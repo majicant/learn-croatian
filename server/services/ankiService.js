@@ -248,8 +248,8 @@ export async function recoverExistingAnkiNotes(cardsState, settings) {
 
 const ankiCss = `
 .card {
-  background: #fbfbf7;
-  color: #242722;
+  background: #fbfaf7;
+  color: #242424;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 20px;
   line-height: 1.5;
@@ -268,7 +268,7 @@ const ankiCss = `
   line-height: 1.42;
 }
 .cloze {
-  color: #1f6f5b;
+  color: #295f9e;
   font-weight: 800;
 }
 .lc-audio {
@@ -276,7 +276,7 @@ const ankiCss = `
 }
 .lc-divider {
   border: 0;
-  border-top: 1px solid #d8ddcf;
+  border-top: 1px solid #ded9d0;
   margin: 24px 0 18px;
 }
 .lc-english {
@@ -284,39 +284,39 @@ const ankiCss = `
   margin-bottom: 14px;
 }
 .lc-hint {
-  background: #eef3e8;
-  border-left: 3px solid #b9decf;
-  color: #42503d;
+  background: #f1eee7;
+  border-left: 3px solid #d8d1c5;
+  color: #4b4944;
   font-size: 20px;
   margin-top: 18px;
   padding: 10px 12px;
 }
 .lc-note {
-  color: #666d60;
+  color: #6a6862;
   font-size: 18px;
 }
 .nightMode.card,
 .night_mode .card {
-  background: #20231f;
-  color: #f2f3ed;
+  background: #202020;
+  color: #f3f0ea;
 }
 .nightMode .lc-divider,
 .night_mode .lc-divider {
-  border-top-color: #4b5147;
+  border-top-color: #4c4a45;
 }
 .nightMode .cloze,
 .night_mode .cloze {
-  color: #8fd3b6;
+  color: #8eb7e6;
 }
 .nightMode .lc-hint,
 .night_mode .lc-hint {
-  background: #2c332b;
-  border-left-color: #315c4b;
-  color: #d6ddce;
+  background: #2b2a28;
+  border-left-color: #5a554c;
+  color: #ddd8cf;
 }
 .nightMode .lc-note,
 .night_mode .lc-note {
-  color: #b7bdae;
+  color: #bdb8ad;
 }
 `;
 

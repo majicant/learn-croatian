@@ -273,7 +273,7 @@ export function CardsView({ cards, reloadCards, setError }: CardsProps) {
                       <input
                         value={editDraft.hint}
                         onChange={(event) => updateEditDraft({ hint: event.target.value })}
-                        placeholder="kupiti = to buy (perfective)"
+                        placeholder="e.g. to buy"
                       />
                     </label>
                   </>

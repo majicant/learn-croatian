@@ -218,7 +218,7 @@ export function AnalysisPanel({
 
                   <label>
                     Hint (optional)
-                    <input value={hint} onChange={(event) => setHint(event.target.value)} placeholder="kupiti = to buy (perfective)" />
+                    <input value={hint} onChange={(event) => setHint(event.target.value)} placeholder="e.g. to buy" />
                   </label>
                 </>
               )}
