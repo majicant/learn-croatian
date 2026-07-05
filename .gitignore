@@ -1,0 +1,15 @@
+node_modules/
+dist/
+
+.env
+.env.*
+!.env.example
+*.local
+
+data/
+texts/
+
+*.log
+npm-debug.log*
+dev-server.*.log
+*.tsbuildinfo
