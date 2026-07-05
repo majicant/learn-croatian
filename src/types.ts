@@ -48,6 +48,8 @@ export type MinedCard = {
   sentenceId: string;
   croatianSentence: string;
   targetText?: string;
+  targetStart?: number;
+  targetEnd?: number;
   englishTranslation: string;
   hint?: string;
   note?: string;

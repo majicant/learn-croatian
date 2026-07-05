@@ -15,17 +15,34 @@ type CardEditDraft = {
   type: CardType;
   croatianSentence: string;
   targetText: string;
+  targetStart?: number;
+  targetEnd?: number;
   englishTranslation: string;
   hint: string;
   note: string;
 };
 type CardsTab = "pending" | "synced";
 
+type ClozeSelection = {
+  start: number;
+  end: number;
+  text: string;
+};
+
+function hasValidTargetRange(sentence: string, target: string, targetStart?: number, targetEnd?: number) {
+  if (!target || !Number.isInteger(targetStart) || !Number.isInteger(targetEnd)) return false;
+  const start = targetStart as number;
+  const end = targetEnd as number;
+  return start >= 0 && end > start && end <= sentence.length && sentence.slice(start, end) === target;
+}
+
 function cardToEditDraft(card: MinedCard): CardEditDraft {
   return {
     type: card.type,
     croatianSentence: card.croatianSentence,
     targetText: card.targetText || "",
+    targetStart: card.targetStart,
+    targetEnd: card.targetEnd,
     englishTranslation: card.englishTranslation,
     hint: card.hint || "",
     note: card.note || ""
@@ -40,7 +57,7 @@ export function CardsView({ cards, reloadCards, setError }: CardsProps) {
   const [selectedCardsTab, setSelectedCardsTab] = useState<CardsTab | "">("");
   const [editingId, setEditingId] = useState("");
   const [editDraft, setEditDraft] = useState<CardEditDraft | null>(null);
-  const [pendingEditSelection, setPendingEditSelection] = useState("");
+  const [pendingEditSelection, setPendingEditSelection] = useState<ClozeSelection | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
   const pendingCount = cards.filter((card) => !isSynced(card)).length;
   const syncedCount = cards.filter(isSynced).length;
@@ -79,13 +96,13 @@ export function CardsView({ cards, reloadCards, setError }: CardsProps) {
     setMessage("");
     setEditingId(card.id);
     setEditDraft(cardToEditDraft(card));
-    setPendingEditSelection("");
+    setPendingEditSelection(null);
   }
 
   function cancelEdit() {
     setEditingId("");
     setEditDraft(null);
-    setPendingEditSelection("");
+    setPendingEditSelection(null);
   }
 
   function selectCardsTab(tab: CardsTab) {
@@ -100,21 +117,34 @@ export function CardsView({ cards, reloadCards, setError }: CardsProps) {
   function captureEditSelection() {
     const textarea = editTextareaRef.current;
     if (!textarea || textarea.selectionStart === textarea.selectionEnd) {
-      setPendingEditSelection("");
+      setPendingEditSelection(null);
       return;
     }
 
-    const selected = textarea.value.slice(textarea.selectionStart, textarea.selectionEnd).trim();
-    if (selected && textarea.value.includes(selected)) {
-      setPendingEditSelection(selected);
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const selected = textarea.value.slice(start, end);
+    if (selected.trim()) {
+      setPendingEditSelection({ start, end, text: selected });
+    } else {
+      setPendingEditSelection(null);
     }
   }
 
   function hideEditSelection() {
     if (!pendingEditSelection) return;
-    updateEditDraft({ targetText: pendingEditSelection });
-    setPendingEditSelection("");
+    updateEditDraft({
+      targetText: pendingEditSelection.text,
+      targetStart: pendingEditSelection.start,
+      targetEnd: pendingEditSelection.end
+    });
+    setPendingEditSelection(null);
     window.getSelection()?.removeAllRanges();
+  }
+
+  function clearEditTargetSelection() {
+    updateEditDraft({ targetText: "", targetStart: undefined, targetEnd: undefined });
+    setPendingEditSelection(null);
   }
 
   async function saveEdit(card: MinedCard) {
@@ -179,7 +209,8 @@ export function CardsView({ cards, reloadCards, setError }: CardsProps) {
     const isEditing = editingId === card.id && editDraft;
     const editNeedsHiddenText = editDraft?.type === "cloze";
     const editTargetInSentence = Boolean(
-      editDraft?.targetText && editDraft.croatianSentence.includes(editDraft.targetText)
+      editDraft &&
+        hasValidTargetRange(editDraft.croatianSentence, editDraft.targetText, editDraft.targetStart, editDraft.targetEnd)
     );
     const canSaveEdit = Boolean(
       editDraft &&
@@ -211,6 +242,8 @@ export function CardsView({ cards, reloadCards, setError }: CardsProps) {
                     updateEditDraft({
                       type: nextType,
                       targetText: nextType === "cloze" ? editDraft.targetText : "",
+                      targetStart: nextType === "cloze" ? editDraft.targetStart : undefined,
+                      targetEnd: nextType === "cloze" ? editDraft.targetEnd : undefined,
                       hint: nextType === "cloze" ? editDraft.hint : ""
                     });
                   }}
@@ -228,8 +261,13 @@ export function CardsView({ cards, reloadCards, setError }: CardsProps) {
                     ref={editTextareaRef}
                     value={editDraft.croatianSentence}
                     onChange={(event) => {
-                      updateEditDraft({ croatianSentence: event.target.value });
-                      setPendingEditSelection("");
+                      updateEditDraft({
+                        croatianSentence: event.target.value,
+                        targetText: "",
+                        targetStart: undefined,
+                        targetEnd: undefined
+                      });
+                      setPendingEditSelection(null);
                     }}
                     onKeyUp={captureEditSelection}
                     onMouseUp={captureEditSelection}
@@ -243,25 +281,33 @@ export function CardsView({ cards, reloadCards, setError }: CardsProps) {
                 {editNeedsHiddenText && (
                   <>
                     <div className="target-row">
-                      <label>
-                        Hidden text
-                        <input
-                          value={editDraft.targetText}
-                          onChange={(event) => {
-                            updateEditDraft({ targetText: event.target.value });
-                            setPendingEditSelection("");
-                          }}
-                          placeholder="Highlight text above, then click Hide"
-                        />
-                      </label>
+                      <div className={`target-summary ${editDraft.targetText ? "selected" : ""}`} aria-live="polite">
+                        <div className="target-summary-head">
+                          <span>Hidden text</span>
+                          {editDraft.targetText && (
+                            <button
+                              type="button"
+                              className="target-clear-button"
+                              onClick={clearEditTargetSelection}
+                              title="Clear hidden text"
+                              aria-label="Clear hidden text"
+                            >
+                              <X size={14} aria-hidden="true" />
+                            </button>
+                          )}
+                        </div>
+                        <strong className={editDraft.targetText ? "" : "empty"}>
+                          {editDraft.targetText || "None selected"}
+                        </strong>
+                      </div>
                       <button
                         type="button"
-                        className="secondary"
+                        className="secondary target-hide-button"
                         disabled={!pendingEditSelection}
                         onMouseDown={(event) => event.preventDefault()}
                         onClick={hideEditSelection}
                       >
-                        Hide
+                        {editDraft.targetText ? "Replace" : "Hide selection"}
                       </button>
                     </div>
                     {editDraft.targetText && !editTargetInSentence && (
@@ -301,6 +347,8 @@ export function CardsView({ cards, reloadCards, setError }: CardsProps) {
                 <TargetSentence
                   sentence={editDraft.croatianSentence}
                   target={editNeedsHiddenText ? editDraft.targetText : ""}
+                  targetStart={editNeedsHiddenText ? editDraft.targetStart : undefined}
+                  targetEnd={editNeedsHiddenText ? editDraft.targetEnd : undefined}
                 />
               </div>
 

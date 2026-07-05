@@ -93,13 +93,20 @@ export function groupStoriesByFolder(stories: StorySummary[], folders: StoryFold
   return groups;
 }
 
-export function targetParts(sentence: string, target: string) {
-  if (!target) return { before: sentence, target: "", after: "" };
-  const index = sentence.indexOf(target);
-  if (index === -1) return { before: sentence, target: "", after: "" };
+export function targetParts(sentence: string, target: string, targetStart?: number, targetEnd?: number) {
+  if (!target || !Number.isInteger(targetStart) || !Number.isInteger(targetEnd)) {
+    return { before: sentence, target: "", after: "" };
+  }
+
+  const start = targetStart as number;
+  const end = targetEnd as number;
+  if (start < 0 || end <= start || end > sentence.length || sentence.slice(start, end) !== target) {
+    return { before: sentence, target: "", after: "" };
+  }
+
   return {
-    before: sentence.slice(0, index),
-    target,
-    after: sentence.slice(index + target.length)
+    before: sentence.slice(0, start),
+    target: sentence.slice(start, end),
+    after: sentence.slice(end)
   };
 }

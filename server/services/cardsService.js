@@ -15,18 +15,46 @@ export function requireField(value, message) {
   return cleaned;
 }
 
-export function validateTargetInSentence(sentence, targetText) {
-  if (!sentence.includes(targetText)) {
-    const error = new Error(`Hidden text must exactly match text in the Croatian sentence: "${targetText}".`);
+export function requireText(value, message) {
+  const text = String(value ?? "");
+  if (!text.trim()) {
+    const error = new Error(message);
     error.status = 400;
     throw error;
   }
+  return text;
+}
+
+export function targetSelectionFromBody(sentence, body) {
+  const targetStart = Number(body.targetStart);
+  const targetEnd = Number(body.targetEnd);
+  if (
+    !Number.isInteger(targetStart) ||
+    !Number.isInteger(targetEnd) ||
+    targetStart < 0 ||
+    targetEnd <= targetStart ||
+    targetEnd > sentence.length
+  ) {
+    const error = new Error("Hidden text selection is out of range.");
+    error.status = 400;
+    throw error;
+  }
+
+  const targetText = sentence.slice(targetStart, targetEnd);
+  if (!targetText.trim()) {
+    const error = new Error("Hidden text is required.");
+    error.status = 400;
+    throw error;
+  }
+  return { targetText, targetStart, targetEnd };
 }
 
 export function createCard({ type, story, sentence, body }) {
-  const croatianSentence = requireField(body.croatianSentence || sentence.croatian, "Croatian sentence is required.");
-  const targetText = type === "cloze" ? requireField(body.targetText, "Hidden text is required.") : "";
-  if (type === "cloze") validateTargetInSentence(croatianSentence, targetText);
+  const croatianSentence = requireText(
+    body.croatianSentence === undefined ? sentence.croatian : body.croatianSentence,
+    "Croatian sentence is required."
+  );
+  const targetSelection = type === "cloze" ? targetSelectionFromBody(croatianSentence, body) : null;
 
   return {
     id: makeCardId(),
@@ -43,7 +71,7 @@ export function createCard({ type, story, sentence, body }) {
     ankiNoteId: null,
     syncStatus: "pending",
     syncError: null,
-    ...(type === "cloze" ? { targetText, hint: asCleanString(body.hint) } : {})
+    ...(type === "cloze" ? { ...targetSelection, hint: asCleanString(body.hint) } : {})
   };
 }
 
@@ -61,15 +89,11 @@ export function fieldOrCurrent(body, name, current) {
 
 export function updateCardFields(card, body) {
   const type = cleanCardType(body.type, card.type);
-  const croatianSentence = requireField(
+  const croatianSentence = requireText(
     fieldOrCurrent(body, "croatianSentence", card.croatianSentence),
     "Croatian sentence is required."
   );
-  const targetText =
-    type === "cloze"
-      ? requireField(fieldOrCurrent(body, "targetText", card.targetText), "Hidden text is required.")
-      : "";
-  if (type === "cloze") validateTargetInSentence(croatianSentence, targetText);
+  const targetSelection = type === "cloze" ? targetSelectionFromBody(croatianSentence, body) : null;
 
   const englishTranslation = requireField(
     fieldOrCurrent(body, "englishTranslation", card.englishTranslation),
@@ -87,14 +111,22 @@ export function updateCardFields(card, body) {
   };
   if (type !== "cloze") {
     delete updated.targetText;
+    delete updated.targetStart;
+    delete updated.targetEnd;
     delete updated.hint;
     return updated;
   }
   return {
     ...updated,
-    targetText,
+    ...targetSelection,
     hint: asCleanString(fieldOrCurrent(body, "hint", card.hint))
   };
+}
+
+function sameClozeTarget(existing, draft) {
+  if (draft.type !== "cloze") return true;
+
+  return existing.targetStart === draft.targetStart && existing.targetEnd === draft.targetEnd;
 }
 
 export function isDuplicateCard(cards, draft, ignoredCardId = "") {
@@ -105,7 +137,7 @@ export function isDuplicateCard(cards, draft, ignoredCardId = "") {
       existing.sentenceId === draft.sentenceId &&
       existing.type === draft.type &&
       normalizeText(existing.croatianSentence) === normalizeText(draft.croatianSentence) &&
-      normalizeText(existing.targetText) === normalizeText(draft.targetText)
+      sameClozeTarget(existing, draft)
   );
 }
 

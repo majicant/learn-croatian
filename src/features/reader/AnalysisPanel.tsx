@@ -15,6 +15,12 @@ type AnalysisPanelProps = {
   setError: (message: string) => void;
 };
 
+type ClozeSelection = {
+  start: number;
+  end: number;
+  text: string;
+};
+
 export function AnalysisPanel({
   story,
   sentence,
@@ -27,25 +33,26 @@ export function AnalysisPanel({
   const croatianTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [cardType, setCardType] = useState<CardType>("basic");
   const [croatianSentence, setCroatianSentence] = useState("");
-  const [targetText, setTargetText] = useState("");
+  const [targetSelection, setTargetSelection] = useState<ClozeSelection | null>(null);
   const [englishTranslation, setEnglishTranslation] = useState("");
   const [hint, setHint] = useState("");
   const [note, setNote] = useState("");
   const [noteOpen, setNoteOpen] = useState(false);
-  const [pendingSelection, setPendingSelection] = useState("");
+  const [pendingSelection, setPendingSelection] = useState<ClozeSelection | null>(null);
   const [generateAudio, setGenerateAudio] = useState(false);
   const [saving, setSaving] = useState(false);
+  const targetText = targetSelection?.text || "";
 
   useEffect(() => {
     if (!sentence) return;
     setCardType("basic");
     setCroatianSentence(sentence.croatian);
-    setTargetText("");
+    setTargetSelection(null);
     setEnglishTranslation(sentence.analysis?.english || "");
     setHint("");
     setNote("");
     setNoteOpen(false);
-    setPendingSelection("");
+    setPendingSelection(null);
     setGenerateAudio(false);
   }, [sentence?.id]);
 
@@ -57,21 +64,30 @@ export function AnalysisPanel({
   function captureCroatianSelection() {
     const textarea = croatianTextareaRef.current;
     if (!textarea || textarea.selectionStart === textarea.selectionEnd) {
-      setPendingSelection("");
+      setPendingSelection(null);
       return;
     }
 
-    const selected = textarea.value.slice(textarea.selectionStart, textarea.selectionEnd).trim();
-    if (selected && textarea.value.includes(selected)) {
-      setPendingSelection(selected);
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const selected = textarea.value.slice(start, end);
+    if (selected.trim()) {
+      setPendingSelection({ start, end, text: selected });
+    } else {
+      setPendingSelection(null);
     }
   }
 
   function applyPendingSelection() {
     if (!pendingSelection) return;
-    setTargetText(pendingSelection);
-    setPendingSelection("");
+    setTargetSelection(pendingSelection);
+    setPendingSelection(null);
     window.getSelection()?.removeAllRanges();
+  }
+
+  function clearTargetSelection() {
+    setTargetSelection(null);
+    setPendingSelection(null);
   }
 
   async function saveCard() {
@@ -86,7 +102,8 @@ export function AnalysisPanel({
           storyId: story.id,
           sentenceId: sentence.id,
           croatianSentence,
-          targetText,
+          targetStart: targetSelection?.start,
+          targetEnd: targetSelection?.end,
           englishTranslation,
           hint,
           note,
@@ -94,11 +111,11 @@ export function AnalysisPanel({
         })
       });
       await refreshStoryAndCards();
-      setTargetText("");
+      setTargetSelection(null);
       setHint("");
       setNote("");
       setNoteOpen(false);
-      setPendingSelection("");
+      setPendingSelection(null);
       setGenerateAudio(false);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Card save failed.");
@@ -108,7 +125,9 @@ export function AnalysisPanel({
   }
 
   const needsHiddenText = cardType === "cloze";
-  const targetInSentence = targetText ? croatianSentence.includes(targetText) : false;
+  const targetInSentence = targetSelection
+    ? croatianSentence.slice(targetSelection.start, targetSelection.end) === targetSelection.text
+    : false;
   const canSave = Boolean(
     sentence && croatianSentence && englishTranslation && !saving && (!needsHiddenText || (targetText && targetInSentence))
   );
@@ -185,7 +204,8 @@ export function AnalysisPanel({
                   value={croatianSentence}
                   onChange={(event) => {
                     setCroatianSentence(event.target.value);
-                    setPendingSelection("");
+                    setTargetSelection(null);
+                    setPendingSelection(null);
                   }}
                   onKeyUp={captureCroatianSelection}
                   onMouseUp={captureCroatianSelection}
@@ -199,19 +219,25 @@ export function AnalysisPanel({
               {needsHiddenText && (
                 <>
                   <div className="target-row">
-                    <label>
-                      Hidden text
-                      <input
-                        value={targetText}
-                        onChange={(event) => {
-                          setTargetText(event.target.value);
-                          setPendingSelection("");
-                        }}
-                        placeholder="Highlight text above, then click Hide"
-                      />
-                    </label>
-                    <button type="button" className="secondary" disabled={!pendingSelection} onMouseDown={(event) => event.preventDefault()} onClick={applyPendingSelection}>
-                      Hide
+                    <div className={`target-summary ${targetText ? "selected" : ""}`} aria-live="polite">
+                      <div className="target-summary-head">
+                        <span>Hidden text</span>
+                        {targetText && (
+                          <button
+                            type="button"
+                            className="target-clear-button"
+                            onClick={clearTargetSelection}
+                            title="Clear hidden text"
+                            aria-label="Clear hidden text"
+                          >
+                            <X size={14} aria-hidden="true" />
+                          </button>
+                        )}
+                      </div>
+                      <strong className={targetText ? "" : "empty"}>{targetText || "None selected"}</strong>
+                    </div>
+                    <button type="button" className="secondary target-hide-button" disabled={!pendingSelection} onMouseDown={(event) => event.preventDefault()} onClick={applyPendingSelection}>
+                      {targetText ? "Replace" : "Hide selection"}
                     </button>
                   </div>
                   {targetText && !targetInSentence && <p className="field-error">Hidden text must match the Croatian text exactly.</p>}
@@ -253,7 +279,12 @@ export function AnalysisPanel({
             </label>
 
             <div className="mine-preview">
-              <TargetSentence sentence={croatianSentence} target={needsHiddenText ? targetText : ""} />
+              <TargetSentence
+                sentence={croatianSentence}
+                target={needsHiddenText ? targetText : ""}
+                targetStart={needsHiddenText ? targetSelection?.start : undefined}
+                targetEnd={needsHiddenText ? targetSelection?.end : undefined}
+              />
             </div>
 
             <button className="full" disabled={!canSave} onClick={() => void saveCard()}>

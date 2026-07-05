@@ -20,14 +20,31 @@ export function withCardComment(card, html) {
   return `<!--lc:${escapeHtml(card.id)}-->${html}`;
 }
 
+export function clozeRange(card) {
+  const sentence = String(card.croatianSentence || "");
+  const targetText = String(card.targetText || "");
+  if (!targetText.trim() || !Number.isInteger(card.targetStart) || !Number.isInteger(card.targetEnd)) {
+    return null;
+  }
+
+  const start = card.targetStart;
+  const end = card.targetEnd;
+  if (start < 0 || end <= start || end > sentence.length || sentence.slice(start, end) !== targetText) {
+    return null;
+  }
+  return { start, end };
+}
+
 export function clozeText(card) {
-  const index = card.croatianSentence.indexOf(card.targetText);
-  if (index === -1) return withCardComment(card, htmlText(card.croatianSentence));
+  const range = clozeRange(card);
+  if (!range) return withCardComment(card, htmlText(card.croatianSentence));
 
   return withCardComment(
     card,
-    `${htmlText(card.croatianSentence.slice(0, index))}{{c1::${htmlText(card.targetText)}}}${htmlText(
-      card.croatianSentence.slice(index + card.targetText.length)
+    `${htmlText(card.croatianSentence.slice(0, range.start))}{{c1::${htmlText(
+      card.croatianSentence.slice(range.start, range.end)
+    )}}}${htmlText(
+      card.croatianSentence.slice(range.end)
     )}`
   );
 }
