@@ -1,4 +1,4 @@
-export function splitParagraphs(text) {
+function splitParagraphs(text) {
   return String(text || "")
     .replace(/\r\n/g, "\n")
     .split(/\n\s*\n/g)
@@ -6,12 +6,12 @@ export function splitParagraphs(text) {
     .filter(Boolean);
 }
 
-export function splitSentences(paragraph) {
+function splitSentences(paragraph) {
   const segmenter = new Intl.Segmenter("hr", { granularity: "sentence" });
   return Array.from(segmenter.segment(paragraph), (segment) => segment.segment.trim()).filter(Boolean);
 }
 
-export function buildStory({ title, level, text }) {
+export function buildStory({ title, level, text, folderId }) {
   const paragraphs = splitParagraphs(text);
   let sentenceNumber = 1;
 
@@ -19,6 +19,7 @@ export function buildStory({ title, level, text }) {
     id: "",
     title: String(title || "").trim(),
     level: String(level || "").trim() || "A1",
+    folderId: String(folderId || "").trim(),
     paragraphs: paragraphs.map((paragraph, paragraphIndex) => ({
       id: `p${String(paragraphIndex + 1).padStart(3, "0")}`,
       sentences: splitSentences(paragraph).map((sentence) => {

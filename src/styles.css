@@ -290,9 +290,106 @@ h4 {
   gap: 0.9rem;
 }
 
+.sidebar-mode-toggle {
+  border: 1px solid var(--border);
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  margin-bottom: 0.75rem;
+}
+
+.sidebar-mode-toggle button {
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  font-weight: 750;
+  min-width: 0;
+}
+
+.sidebar-mode-toggle button.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.folder-toolbar {
+  display: grid;
+  margin: -0.05rem 0 0.7rem;
+}
+
+.folder-add-button,
+.level-collapse-button,
+.folder-collapse-button,
+.folder-name-button {
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted);
+}
+
+.folder-add-button,
+.level-collapse-button,
+.folder-collapse-button {
+  min-height: 1.8rem;
+  padding: 0.15rem;
+}
+
+.folder-add-button {
+  background: var(--surface-strong);
+  border-color: var(--border);
+  color: var(--accent);
+  font-size: 0.82rem;
+  font-weight: 750;
+  gap: 0.35rem;
+  justify-content: flex-start;
+  min-height: 2.15rem;
+  padding: 0.32rem 0.55rem;
+  width: 100%;
+}
+
+.folder-add-button:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.level-collapse-button:hover,
+.folder-collapse-button:hover,
+.folder-name-button:hover {
+  color: var(--ink);
+}
+
 .level-folder {
   display: grid;
   gap: 0.35rem;
+}
+
+.folder-section {
+  border: 1px solid transparent;
+  margin: 0 -0.2rem;
+  padding: 0.14rem 0.2rem 0.2rem;
+  transition: background-color 120ms ease-out, border-color 120ms ease-out;
+}
+
+.folder-section.has-drag-target {
+  background: #eef2e7;
+  border-color: #cbd9c2;
+}
+
+.folder-section.has-drag-target .folder-folder-head {
+  color: var(--ink);
+}
+
+.level-drop-section {
+  border-left: 2px solid transparent;
+  margin-left: -0.2rem;
+  padding-left: 0.2rem;
+  transition: background-color 120ms ease-out, border-color 120ms ease-out;
+}
+
+.level-drop-section.has-drag-target {
+  background: #eef2e7;
+  border-left-color: var(--accent);
+}
+
+.level-drop-section.has-drag-target .level-list-head {
+  color: var(--ink);
 }
 
 .level-folder-head {
@@ -308,21 +405,78 @@ h4 {
   text-transform: uppercase;
 }
 
-.level-folder-head small {
+.level-list-head {
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.25rem;
+  padding-left: 0;
+}
+
+.level-collapse-button {
+  width: 1.35rem;
+}
+
+.folder-folder-head {
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  letter-spacing: 0;
+  padding-left: 0;
+  text-transform: none;
+}
+
+.unfiled-folder-head {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.folder-name-button,
+.folder-name-static {
   color: var(--muted);
-  font-size: 0.75rem;
+  display: block;
+  font-size: 0.82rem;
+  font-weight: 760;
+  justify-content: start;
+  min-height: 1.8rem;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0.12rem 0.2rem;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-name-static {
+  line-height: 1.8rem;
+}
+
+.folder-name-input {
+  background: var(--surface-strong);
+  font-size: 0.82rem;
+  font-weight: 760;
+  min-height: 1.8rem;
+  padding: 0.18rem 0.35rem;
+}
+
+.story-name-input {
+  background: var(--surface-strong);
+  font-size: 0.92rem;
+  font-weight: 720;
+  min-height: 2rem;
+  padding: 0.25rem 0.4rem;
 }
 
 .story-row {
+  align-items: start;
   background: transparent;
-  border-color: transparent;
+  border: 1px solid transparent;
   color: var(--ink);
   display: grid;
   gap: 0.35rem;
-  justify-items: stretch;
-  padding: 0.58rem 0.65rem 0.58rem 1.85rem;
-  text-align: left;
+  grid-template-columns: minmax(0, 1fr) 1.8rem;
+  padding: 0.52rem 0.35rem 0.58rem 1.5rem;
+  position: relative;
   width: 100%;
+}
+
+.story-row.dragging {
+  opacity: 0.48;
 }
 
 .story-row.selected {
@@ -330,8 +484,37 @@ h4 {
   border-color: #c9ded5;
 }
 
+.story-row-main {
+  align-content: start;
+  align-items: start;
+  background: transparent;
+  border: 0;
+  color: var(--ink);
+  display: grid;
+  gap: 0.28rem;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  justify-content: stretch;
+  justify-items: stretch;
+  min-height: 2.45rem;
+  padding: 0;
+  text-align: left;
+  width: 100%;
+}
+
+.story-row-main:hover {
+  color: #1f4f44;
+}
+
+.story-row-editing {
+  align-content: center;
+}
+
 .story-title {
+  display: block;
   font-weight: 720;
+  line-height: 1.25;
+  min-width: 0;
 }
 
 .story-meta {
@@ -339,16 +522,69 @@ h4 {
   font-size: 0.82rem;
   gap: 0.6rem;
   justify-content: flex-start;
+  line-height: 1;
+  min-height: 1rem;
 }
 
 .status {
   color: var(--warning);
   gap: 0.25rem;
+  line-height: 1;
   white-space: nowrap;
+}
+
+.status svg {
+  flex: 0 0 auto;
 }
 
 .status.done {
   color: var(--accent);
+}
+
+.folder-empty {
+  font-size: 0.83rem;
+  margin: 0.1rem 0 0.25rem 1.5rem;
+}
+
+.row-menu-wrap {
+  align-self: start;
+  position: relative;
+  width: 1.8rem;
+}
+
+.row-menu-button {
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted);
+  min-height: 1.8rem;
+  padding: 0.12rem;
+  width: 1.8rem;
+}
+
+.row-menu-button:hover {
+  color: var(--ink);
+}
+
+.row-menu {
+  background: var(--surface-strong);
+  border: 1px solid var(--border);
+  box-shadow: 0 8px 20px rgba(39, 43, 36, 0.12);
+  min-width: 8.5rem;
+  padding: 0.25rem;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.15rem);
+  z-index: 30;
+}
+
+.row-menu button {
+  background: transparent;
+  border: 0;
+  color: var(--danger);
+  justify-content: flex-start;
+  min-height: 2rem;
+  padding: 0.32rem 0.45rem;
+  width: 100%;
 }
 
 .reader-head {
@@ -590,7 +826,7 @@ h4 {
 .field-grid {
   display: grid;
   gap: 1rem;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }
 
 .file-input {

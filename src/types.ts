@@ -1,6 +1,6 @@
 export type View = "read" | "import" | "cards" | "settings";
 export type CardType = "basic" | "cloze";
-export type SyncStatus = "pending" | "synced" | "error";
+type SyncStatus = "pending" | "synced" | "error";
 
 export type Analysis = {
   english: string;
@@ -24,6 +24,7 @@ export type Story = {
   id: string;
   title: string;
   level: string;
+  folderId: string;
   paragraphs: Paragraph[];
 };
 
@@ -31,7 +32,13 @@ export type StorySummary = {
   id: string;
   title: string;
   level: string;
+  folderId: string;
   completed: boolean;
+};
+
+export type StoryFolder = {
+  id: string;
+  name: string;
 };
 
 export type MinedCard = {

@@ -12,11 +12,12 @@ import { CardsView } from "./features/cards/CardsView";
 import { ImportView } from "./features/import/ImportView";
 import { ReaderView } from "./features/reader/ReaderView";
 import { SettingsView } from "./features/settings/SettingsView";
-import type { Analysis, MinedCard, SettingsState, Sentence, Story, StorySummary, View } from "./types";
+import type { Analysis, MinedCard, SettingsState, Sentence, Story, StoryFolder, StorySummary, View } from "./types";
 
 function App() {
   const [view, setView] = useState<View>("read");
   const [stories, setStories] = useState<StorySummary[]>([]);
+  const [storyFolders, setStoryFolders] = useState<StoryFolder[]>([]);
   const [story, setStory] = useState<Story | null>(null);
   const [selectedStoryId, setSelectedStoryId] = useState<string>("");
   const [selectedSentenceId, setSelectedSentenceId] = useState<string>("");
@@ -56,6 +57,11 @@ function App() {
     setCards(payload.cards);
   }
 
+  async function loadStoryFolders() {
+    const payload = await apiJson<{ folders: StoryFolder[] }>("/api/texts/folders");
+    setStoryFolders(payload.folders);
+  }
+
   async function loadSettings() {
     const payload = await apiJson<{ settings: SettingsState }>("/api/settings");
     setSettings(payload.settings);
@@ -76,7 +82,7 @@ function App() {
   }
 
   useEffect(() => {
-    Promise.all([loadStories(), loadCards(), loadSettings()]).catch((caught) => setError(caught.message));
+    Promise.all([loadStories(), loadStoryFolders(), loadCards(), loadSettings()]).catch((caught) => setError(caught.message));
   }, []);
 
   useEffect(() => {
@@ -144,6 +150,74 @@ function App() {
     await loadStories();
   }
 
+  async function createStoryFolder() {
+    const payload = await apiJson<{ folder: StoryFolder }>("/api/texts/folders", {
+      method: "POST",
+      body: JSON.stringify({})
+    });
+    setStoryFolders((current) => [...current, payload.folder]);
+    return payload.folder;
+  }
+
+  async function renameStoryFolder(folderId: string, name: string) {
+    const payload = await apiJson<{ folder: StoryFolder }>(`/api/texts/folders/${folderId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name })
+    });
+    setStoryFolders((current) => current.map((item) => (item.id === folderId ? payload.folder : item)));
+  }
+
+  async function renameStory(storyId: string, title: string) {
+    const payload = await apiJson<{ title: string }>(`/api/texts/${storyId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ title })
+    });
+    setStories((current) => current.map((item) => (item.id === storyId ? { ...item, title: payload.title } : item)));
+    setStory((current) => (current?.id === storyId ? { ...current, title: payload.title } : current));
+  }
+
+  async function changeStoryLevel(storyId: string, level: string) {
+    const payload = await apiJson<{ level: string }>(`/api/texts/${storyId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ level })
+    });
+    setStories((current) => current.map((item) => (item.id === storyId ? { ...item, level: payload.level } : item)));
+    setStory((current) => (current?.id === storyId ? { ...current, level: payload.level } : current));
+  }
+
+  async function moveStoryToFolder(storyId: string, folderId: string) {
+    await apiJson(`/api/texts/${storyId}/folder`, {
+      method: "PATCH",
+      body: JSON.stringify({ folderId })
+    });
+    await loadStories();
+    setStory((current) => (current?.id === storyId ? { ...current, folderId } : current));
+  }
+
+  async function deleteStory(storyId: string) {
+    await apiJson(`/api/texts/${storyId}`, { method: "DELETE" });
+    const remainingStories = stories.filter((item) => item.id !== storyId);
+    setStories(remainingStories);
+    if (selectedStoryId === storyId) {
+      setSelectedStoryId(remainingStories[0]?.id || "");
+      if (!remainingStories.length) setStory(null);
+    }
+    await loadCards();
+  }
+
+  async function deleteStoryFolder(folderId: string) {
+    await apiJson(`/api/texts/folders/${folderId}`, { method: "DELETE" });
+    const deletedStoryIds = new Set(stories.filter((item) => item.folderId === folderId).map((item) => item.id));
+    const remainingStories = stories.filter((item) => !deletedStoryIds.has(item.id));
+    setStoryFolders((current) => current.filter((item) => item.id !== folderId));
+    setStories(remainingStories);
+    if (deletedStoryIds.has(selectedStoryId)) {
+      setSelectedStoryId(remainingStories[0]?.id || "");
+      if (!remainingStories.length) setStory(null);
+    }
+    await loadCards();
+  }
+
   async function selectImportedStory(storyId: string) {
     await loadStories(storyId);
     await loadCards();
@@ -187,8 +261,16 @@ function App() {
       {view === "read" && (
         <ReaderView
           stories={stories}
+          storyFolders={storyFolders}
           selectedStoryId={selectedStoryId}
           onSelectStory={setSelectedStoryId}
+          onCreateFolder={createStoryFolder}
+          onRenameFolder={renameStoryFolder}
+          onRenameStory={renameStory}
+          onChangeStoryLevel={changeStoryLevel}
+          onMoveStoryToFolder={moveStoryToFolder}
+          onDeleteFolder={deleteStoryFolder}
+          onDeleteStory={deleteStory}
           story={story}
           loadingStory={loadingStory}
           pages={pages}
@@ -206,7 +288,7 @@ function App() {
         />
       )}
 
-      {view === "import" && <ImportView onImported={selectImportedStory} setError={setError} />}
+      {view === "import" && <ImportView storyFolders={storyFolders} onImported={selectImportedStory} setError={setError} />}
 
       {view === "cards" && <CardsView cards={cards} reloadCards={loadCards} setError={setError} />}
 

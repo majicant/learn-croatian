@@ -1,5 +1,5 @@
 import { promises as fs } from "node:fs";
-import { cardsFile, dataDir, defaultSettings, mediaDir, progressFile, settingsFile, textsDir } from "../config.js";
+import { cardsFile, dataDir, defaultSettings, mediaDir, progressFile, settingsFile, storyFoldersFile, textsDir } from "../config.js";
 import { ensureJsonFile } from "./jsonStore.js";
 
 export async function ensureStorage() {
@@ -9,4 +9,5 @@ export async function ensureStorage() {
   await ensureJsonFile(cardsFile, { cards: [], deletedAnkiNoteIds: [] });
   await ensureJsonFile(progressFile, { stories: {} });
   await ensureJsonFile(settingsFile, defaultSettings);
+  await ensureJsonFile(storyFoldersFile, { folders: [] });
 }

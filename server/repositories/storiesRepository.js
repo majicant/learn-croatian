@@ -13,7 +13,7 @@ export function assertStoryId(id) {
   }
 }
 
-export function storyPath(id) {
+function storyPath(id) {
   assertStoryId(id);
   return path.join(textsDir, `${id}.json`);
 }
@@ -26,24 +26,27 @@ export async function writeStory(story) {
   await writeJsonSafe(storyPath(story.id), story);
 }
 
+async function readAllStories() {
+  const files = (await fs.readdir(textsDir)).filter((file) => file.endsWith(".json"));
+  const stories = await Promise.all(files.map((file) => readJson(path.join(textsDir, file), null)));
+  return stories.filter(Boolean);
+}
+
 export async function listStories() {
   const progress = await readProgress();
-  const files = (await fs.readdir(textsDir)).filter((file) => file.endsWith(".json"));
-  const stories = await Promise.all(
-    files.map(async (file) => {
-      const story = await readJson(path.join(textsDir, file), null);
-      if (!story) return null;
-      const state = progress.stories[story.id] || {};
-      return {
-        id: story.id,
-        title: story.title,
-        level: story.level,
-        completed: Boolean(state.completed)
-      };
-    })
-  );
+  const stories = await readAllStories();
+  const summaries = stories.map((story) => {
+    const state = progress.stories[story.id] || {};
+    return {
+      id: story.id,
+      title: story.title,
+      level: story.level,
+      folderId: story.folderId || "",
+      completed: Boolean(state.completed)
+    };
+  });
 
-  return stories.filter(Boolean).sort((a, b) => a.title.localeCompare(b.title, "hr"));
+  return summaries.sort((a, b) => a.title.localeCompare(b.title, "hr"));
 }
 
 export function attachCardStatus(story, cards) {
@@ -55,6 +58,7 @@ export function attachCardStatus(story, cards) {
 
   return {
     ...story,
+    folderId: story.folderId || "",
     paragraphs: story.paragraphs.map((paragraph) => ({
       ...paragraph,
       sentences: paragraph.sentences.map((sentence) => {
@@ -67,6 +71,53 @@ export function attachCardStatus(story, cards) {
       })
     }))
   };
+}
+
+export async function updateStoryMetadata(id, values) {
+  const story = await readStory(id);
+  if (!story) return null;
+
+  if (Object.prototype.hasOwnProperty.call(values, "title")) {
+    const cleanTitle = String(values.title || "").trim().replace(/\s+/g, " ");
+    if (!cleanTitle) {
+      const error = new Error("Story title is required.");
+      error.status = 400;
+      throw error;
+    }
+    story.title = cleanTitle;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(values, "level")) {
+    const cleanLevel = String(values.level || "").trim();
+    if (!cleanLevel) {
+      const error = new Error("Story level is required.");
+      error.status = 400;
+      throw error;
+    }
+    story.level = cleanLevel;
+  }
+
+  await writeStory(story);
+  return story;
+}
+
+export async function moveStoryToFolder(id, folderId) {
+  const story = await readStory(id);
+  if (!story) return null;
+
+  story.folderId = folderId || "";
+  await writeStory(story);
+  return story;
+}
+
+export async function deleteStories(ids) {
+  const storyIdSet = new Set(ids);
+  const stories = await readAllStories();
+  const deletedStories = stories.filter((story) => storyIdSet.has(story.id));
+  if (!deletedStories.length) return [];
+
+  await Promise.all(deletedStories.map((story) => fs.rm(storyPath(story.id), { force: true })));
+  return deletedStories;
 }
 
 export function findSentence(story, sentenceId) {

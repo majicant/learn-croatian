@@ -1,5 +1,5 @@
 import { READING_LEVELS } from "../constants";
-import type { ImportPreview, Paragraph, Sentence, Story, StorySummary } from "../types";
+import type { ImportPreview, Paragraph, Sentence, Story, StoryFolder, StorySummary } from "../types";
 
 export function splitPreview(text: string): ImportPreview {
   const sentencePattern = /[^.!?\u2026]+(?:[.!?\u2026]+["'")\]]*)?|[^.!?\u2026]+$/gu;
@@ -49,12 +49,19 @@ export function buildPages(paragraphs: Paragraph[]): Paragraph[][] {
 
 export function groupStoriesByLevel(stories: StorySummary[]) {
   const grouped = new Map<string, StorySummary[]>();
+  for (const level of READING_LEVELS) {
+    grouped.set(level, []);
+  }
+
   for (const story of stories) {
     const level = story.level || "Other";
     grouped.set(level, [...(grouped.get(level) || []), story]);
   }
 
-  return Array.from(grouped.entries()).sort(([a], [b]) => {
+  return Array.from(grouped.entries()).map(
+    ([level, levelStories]) =>
+      [level, [...levelStories].sort((a, b) => a.title.localeCompare(b.title, "hr"))] as [string, StorySummary[]]
+  ).sort(([a], [b]) => {
     const aIndex = READING_LEVELS.indexOf(a);
     const bIndex = READING_LEVELS.indexOf(b);
     if (aIndex !== -1 || bIndex !== -1) {
@@ -62,6 +69,28 @@ export function groupStoriesByLevel(stories: StorySummary[]) {
     }
     return a.localeCompare(b, "hr");
   });
+}
+
+export function groupStoriesByFolder(stories: StorySummary[], folders: StoryFolder[]) {
+  const storiesByFolder = new Map<string, StorySummary[]>();
+  for (const story of stories) {
+    const folderId = story.folderId;
+    storiesByFolder.set(folderId, [...(storiesByFolder.get(folderId) || []), story]);
+  }
+
+  const sortStories = (items: StorySummary[]) =>
+    [...items].sort((a, b) => a.title.localeCompare(b.title, "hr"));
+
+  const unfiledStories = sortStories(storiesByFolder.get("") || []);
+  const groups: Array<[StoryFolder, StorySummary[]]> = [];
+
+  groups.push([{ id: "", name: "Unfiled" }, unfiledStories]);
+
+  for (const folder of folders) {
+    groups.push([folder, sortStories(storiesByFolder.get(folder.id) || [])]);
+  }
+
+  return groups;
 }
 
 export function targetParts(sentence: string, target: string) {

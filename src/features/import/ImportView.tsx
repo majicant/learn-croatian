@@ -3,15 +3,18 @@ import { ChangeEvent, FormEvent, useMemo, useState } from "react";
 import { apiJson } from "../../api/client";
 import { READING_LEVELS } from "../../constants";
 import { splitPreview } from "../../domain/stories";
+import type { StoryFolder } from "../../types";
 
 type ImportProps = {
+  storyFolders: StoryFolder[];
   onImported: (storyId: string) => Promise<void>;
   setError: (message: string) => void;
 };
 
-export function ImportView({ onImported, setError }: ImportProps) {
+export function ImportView({ storyFolders, onImported, setError }: ImportProps) {
   const [title, setTitle] = useState("");
   const [level, setLevel] = useState("A2");
+  const [folderId, setFolderId] = useState("");
   const [text, setText] = useState("");
   const [saving, setSaving] = useState(false);
   const preview = useMemo(() => splitPreview(text), [text]);
@@ -31,7 +34,7 @@ export function ImportView({ onImported, setError }: ImportProps) {
     try {
       const payload = await apiJson<{ storyId: string }>("/api/texts/import", {
         method: "POST",
-        body: JSON.stringify({ title, level, text })
+        body: JSON.stringify({ title, level, folderId, text })
       });
       setTitle("");
       setText("");
@@ -59,6 +62,17 @@ export function ImportView({ onImported, setError }: ImportProps) {
                 {READING_LEVELS.map((item) => (
                   <option key={item} value={item}>
                     {item}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Folder
+              <select value={folderId} onChange={(event) => setFolderId(event.target.value)}>
+                <option value="">Unfiled</option>
+                {storyFolders.map((folder) => (
+                  <option key={folder.id} value={folder.id}>
+                    {folder.name}
                   </option>
                 ))}
               </select>
