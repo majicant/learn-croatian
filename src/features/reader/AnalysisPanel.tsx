@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { apiJson } from "../../api/client";
 import { cardTypeLabel, syncLabel } from "../../domain/cards";
 import type { CardType, MinedCard, Sentence, Story } from "../../types";
+import { CardEditModal } from "../cards/CardEditModal";
 import { TargetSentence } from "./TargetSentence";
 
 type AnalysisPanelProps = {
@@ -41,7 +42,10 @@ export function AnalysisPanel({
   const [pendingSelection, setPendingSelection] = useState<ClozeSelection | null>(null);
   const [generateAudio, setGenerateAudio] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [editingCardId, setEditingCardId] = useState("");
+  const [cardEditorMessage, setCardEditorMessage] = useState("");
   const targetText = targetSelection?.text || "";
+  const editingCard = cards.find((card) => card.id === editingCardId) || null;
 
   useEffect(() => {
     if (!sentence) return;
@@ -54,12 +58,19 @@ export function AnalysisPanel({
     setNoteOpen(false);
     setPendingSelection(null);
     setGenerateAudio(false);
+    setEditingCardId("");
+    setCardEditorMessage("");
   }, [sentence?.id]);
 
   useEffect(() => {
     if (!sentence?.analysis?.english) return;
     setEnglishTranslation((current) => current || sentence.analysis?.english || "");
   }, [sentence?.analysis?.english]);
+
+  useEffect(() => {
+    if (!editingCardId || editingCard) return;
+    setEditingCardId("");
+  }, [editingCard, editingCardId]);
 
   function captureCroatianSelection() {
     const textarea = croatianTextareaRef.current;
@@ -117,6 +128,7 @@ export function AnalysisPanel({
       setNoteOpen(false);
       setPendingSelection(null);
       setGenerateAudio(false);
+      setCardEditorMessage("");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Card save failed.");
     } finally {
@@ -174,14 +186,25 @@ export function AnalysisPanel({
               <span>{cards.length}</span>
             </div>
             {cards.length === 0 && <p className="muted">No cards for this sentence yet.</p>}
+            {cardEditorMessage && <p className="success-line">{cardEditorMessage}</p>}
             {cards.map((card) => (
-              <div className="mini-card" key={card.id}>
+              <button
+                className="mini-card"
+                key={card.id}
+                type="button"
+                onClick={() => {
+                  setError("");
+                  setCardEditorMessage("");
+                  setEditingCardId(card.id);
+                }}
+                aria-label={`Edit card: ${card.croatianSentence}`}
+              >
                 <span className="pill">{card.type}</span>
-                <p>
+                <span className="mini-card-body">
                   <strong>{card.type === "basic" ? card.croatianSentence : card.targetText}</strong>
-                  <span>{syncLabel(card)}</span>
-                </p>
-              </div>
+                  <span className="mini-card-status">{syncLabel(card)}</span>
+                </span>
+              </button>
             ))}
           </section>
 
@@ -292,6 +315,16 @@ export function AnalysisPanel({
               {saving ? "Adding..." : "Add card"}
             </button>
           </section>
+
+          {editingCard && (
+            <CardEditModal
+              card={editingCard}
+              onClose={() => setEditingCardId("")}
+              onCardsChanged={refreshStoryAndCards}
+              setError={setError}
+              onMessage={setCardEditorMessage}
+            />
+          )}
         </>
       )}
     </aside>
