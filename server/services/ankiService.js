@@ -1,6 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { basicModelName, clozeModelName, defaultSettings, mediaDir } from "../config.js";
+import { audioOnlyModelName, basicModelName, clozeModelName, defaultSettings, mediaDir } from "../config.js";
 import { asCleanString, slugify } from "../utils/text.js";
 
 export function escapeHtml(value) {
@@ -116,6 +116,41 @@ export function buildAnkiNote(card, settings) {
   };
 }
 
+export function shouldCreateAudioOnlyCard(card) {
+  return Boolean(card.createAudioOnlyCard && card.audioFile);
+}
+
+export function buildAudioOnlyAnkiFields(card) {
+  return {
+    Audio: ankiAudioReference(card),
+    Croatian: withCardComment(card, htmlText(card.croatianSentence)),
+    English: htmlText(card.englishTranslation),
+    SourceCardId: `lc:${card.id}:audio`
+  };
+}
+
+export function buildAudioOnlyAnkiNote(card, settings) {
+  return {
+    deckName: settings.deckName,
+    options: {
+      allowDuplicate: false,
+      duplicateScope: "deck",
+      duplicateScopeOptions: {
+        deckName: settings.deckName,
+        checkChildren: true,
+        checkAllModels: false
+      }
+    },
+    modelName: audioOnlyModelName,
+    fields: buildAudioOnlyAnkiFields(card),
+    tags: ["learn-croatian", "audio-only", card.type, slugify(card.storyId)]
+  };
+}
+
+export function isCardFullySynced(card) {
+  return Boolean(card.ankiNoteId && (!shouldCreateAudioOnlyCard(card) || card.audioOnlyAnkiNoteId));
+}
+
 export function ankiUrlFrom(value) {
   return asCleanString(value).replace(/\/+$/, "") || defaultSettings.ankiUrl;
 }
@@ -150,20 +185,29 @@ export async function invokeAnki(action, params = {}, ankiUrl) {
 }
 
 export async function markMissingAnkiNotesForResync(cardsState, settings) {
-  const syncedCards = cardsState.cards.filter((card) => card.ankiNoteId);
-  if (!syncedCards.length) return 0;
+  const syncedNotes = cardsState.cards.flatMap((card) => {
+    const notes = [];
+    if (card.ankiNoteId) notes.push({ card, noteId: card.ankiNoteId, kind: "main" });
+    if (card.audioOnlyAnkiNoteId) notes.push({ card, noteId: card.audioOnlyAnkiNoteId, kind: "audioOnly" });
+    return notes;
+  });
+  if (!syncedNotes.length) return 0;
 
-  const noteIds = syncedCards.map((card) => Number(card.ankiNoteId));
+  const noteIds = syncedNotes.map((note) => Number(note.noteId));
   const notesInfo = await invokeAnki("notesInfo", { notes: noteIds }, settings.ankiUrl);
   let missing = 0;
 
-  for (let index = 0; index < syncedCards.length; index += 1) {
+  for (let index = 0; index < syncedNotes.length; index += 1) {
     const info = notesInfo[index];
     if (info?.noteId && Array.isArray(info.cards) && info.cards.length > 0) continue;
 
-    const card = syncedCards[index];
+    const { card, kind } = syncedNotes[index];
     missing += 1;
-    card.ankiNoteId = null;
+    if (kind === "audioOnly") {
+      card.audioOnlyAnkiNoteId = null;
+    } else {
+      card.ankiNoteId = null;
+    }
     card.syncStatus = "pending";
     card.syncError = null;
   }
@@ -189,6 +233,10 @@ export async function deleteQueuedAnkiNotes(cardsState, settings) {
 
 export function expectedModelName(card) {
   return card.type === "basic" ? basicModelName : clozeModelName;
+}
+
+export function expectedAudioOnlyModelName() {
+  return audioOnlyModelName;
 }
 
 export function noteHasLocalCardId(noteInfo, cardId) {
@@ -220,7 +268,21 @@ export async function updateExistingAnkiNote(card, noteId, settings) {
   );
 }
 
-export async function findAppNotesForCard(card, settings) {
+export async function updateExistingAudioOnlyAnkiNote(card, noteId, settings) {
+  await uploadCardAudioForUpdate(card, settings);
+  await invokeAnki(
+    "updateNoteFields",
+    {
+      note: {
+        id: noteId,
+        fields: buildAudioOnlyAnkiFields(card)
+      }
+    },
+    settings.ankiUrl
+  );
+}
+
+export async function findAppNotesForCard(card, settings, modelName = expectedModelName(card)) {
   const noteIds = await invokeAnki("findNotes", { query: card.id }, settings.ankiUrl);
   if (!noteIds.length) return [];
 
@@ -229,7 +291,7 @@ export async function findAppNotesForCard(card, settings) {
     .filter(
       (noteInfo) =>
         noteInfo?.noteId &&
-        noteInfo.modelName === expectedModelName(card) &&
+        noteInfo.modelName === modelName &&
         Array.isArray(noteInfo.cards) &&
         noteInfo.cards.length > 0 &&
         noteHasLocalCardId(noteInfo, card.id)
@@ -239,24 +301,43 @@ export async function findAppNotesForCard(card, settings) {
 }
 
 export async function recoverExistingAnkiNotes(cardsState, settings) {
-  const pendingCards = cardsState.cards.filter((card) => !card.ankiNoteId);
+  const pendingCards = cardsState.cards.filter(
+    (card) => !card.ankiNoteId || (shouldCreateAudioOnlyCard(card) && !card.audioOnlyAnkiNoteId)
+  );
   if (!pendingCards.length) return 0;
 
   let recovered = 0;
 
   for (const card of pendingCards) {
-    const noteIds = await findAppNotesForCard(card, settings);
-    if (!noteIds.length) continue;
+    if (!card.ankiNoteId) {
+      const noteIds = await findAppNotesForCard(card, settings);
+      if (noteIds.length) {
+        const [primaryNoteId, ...duplicateNoteIds] = noteIds;
+        if (duplicateNoteIds.length) {
+          await invokeAnki("deleteNotes", { notes: duplicateNoteIds }, settings.ankiUrl);
+        }
+        await updateExistingAnkiNote(card, primaryNoteId, settings);
 
-    const [primaryNoteId, ...duplicateNoteIds] = noteIds;
-    if (duplicateNoteIds.length) {
-      await invokeAnki("deleteNotes", { notes: duplicateNoteIds }, settings.ankiUrl);
+        recovered += 1;
+        card.ankiNoteId = primaryNoteId;
+      }
     }
-    await updateExistingAnkiNote(card, primaryNoteId, settings);
 
-    recovered += 1;
-    card.ankiNoteId = primaryNoteId;
-    card.syncStatus = "synced";
+    if (shouldCreateAudioOnlyCard(card) && !card.audioOnlyAnkiNoteId) {
+      const noteIds = await findAppNotesForCard(card, settings, expectedAudioOnlyModelName());
+      if (noteIds.length) {
+        const [primaryNoteId, ...duplicateNoteIds] = noteIds;
+        if (duplicateNoteIds.length) {
+          await invokeAnki("deleteNotes", { notes: duplicateNoteIds }, settings.ankiUrl);
+        }
+        await updateExistingAudioOnlyAnkiNote(card, primaryNoteId, settings);
+
+        recovered += 1;
+        card.audioOnlyAnkiNoteId = primaryNoteId;
+      }
+    }
+
+    card.syncStatus = isCardFullySynced(card) ? "synced" : "pending";
     card.syncError = null;
   }
 
@@ -290,6 +371,9 @@ const ankiCss = `
 }
 .lc-audio {
   margin-bottom: 14px;
+}
+.lc-audio-front {
+  text-align: center;
 }
 .lc-divider {
   border: 0;
@@ -340,8 +424,8 @@ const ankiCss = `
 function basicTemplates() {
   return {
     "Basic": {
-      Front: `<div class="lc-wrap">{{#Audio}}<div class="lc-audio">{{Audio}}</div>{{/Audio}}<div class="lc-sentence">{{Croatian}}</div></div>`,
-      Back: `<div class="lc-wrap"><div class="lc-sentence">{{Croatian}}</div><hr class="lc-divider"><div class="lc-english">{{English}}</div>{{#Note}}<div class="lc-note">{{Note}}</div>{{/Note}}</div>`
+      Front: `<div class="lc-wrap"><div class="lc-sentence">{{Croatian}}</div></div>`,
+      Back: `<div class="lc-wrap"><div class="lc-sentence">{{Croatian}}</div><hr class="lc-divider"><div class="lc-english">{{English}}</div>{{#Note}}<div class="lc-note">{{Note}}</div>{{/Note}}{{#Audio}}<div class="lc-audio">{{Audio}}</div>{{/Audio}}</div>`
     }
   };
 }
@@ -351,6 +435,15 @@ function clozeTemplates() {
     "Cloze": {
       Front: `<div class="lc-wrap"><div class="lc-sentence">{{cloze:Text}}</div>{{#Hint}}<div class="lc-hint">{{Hint}}</div>{{/Hint}}</div>`,
       Back: `<div class="lc-wrap"><div class="lc-answer">{{cloze:Text}}</div><hr class="lc-divider"><div class="lc-english">{{English}}</div>{{#Note}}<div class="lc-note">{{Note}}</div>{{/Note}}{{#Audio}}<div class="lc-audio">{{Audio}}</div>{{/Audio}}</div>`
+    }
+  };
+}
+
+function audioOnlyTemplates() {
+  return {
+    "Audio": {
+      Front: `<div class="lc-wrap lc-audio-front">{{Audio}}</div>`,
+      Back: `<div class="lc-wrap"><div class="lc-sentence">{{Croatian}}</div><hr class="lc-divider"><div class="lc-english">{{English}}</div></div>`
     }
   };
 }
@@ -427,5 +520,12 @@ export async function ensureAnkiSetup(settings) {
     fields: ["Text", "Hint", "English", "Note", "Audio"],
     templates: clozeTemplates(),
     isCloze: true
+  });
+  await ensureModel({
+    settings,
+    modelName: audioOnlyModelName,
+    fields: ["Audio", "Croatian", "English", "SourceCardId"],
+    templates: audioOnlyTemplates(),
+    isCloze: false
   });
 }

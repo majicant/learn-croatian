@@ -23,6 +23,7 @@ type CardEditDraft = {
   englishTranslation: string;
   hint: string;
   note: string;
+  createAudioOnlyCard: boolean;
 };
 
 type ClozeSelection = {
@@ -47,7 +48,8 @@ function cardToEditDraft(card: MinedCard): CardEditDraft {
     targetEnd: card.targetEnd,
     englishTranslation: card.englishTranslation,
     hint: card.hint || "",
-    note: card.note || ""
+    note: card.note || "",
+    createAudioOnlyCard: Boolean(card.createAudioOnlyCard && card.audioFile)
   };
 }
 
@@ -186,6 +188,7 @@ export function CardEditModal({ card, onClose, onCardsChanged, setError, onMessa
   }
 
   const editNeedsHiddenText = editDraft.type === "cloze";
+  const editHasCurrentAudio = Boolean(card.audioFile && editDraft.croatianSentence === card.croatianSentence);
   const editTargetInSentence = hasValidTargetRange(
     editDraft.croatianSentence,
     editDraft.targetText,
@@ -280,7 +283,8 @@ export function CardEditModal({ card, onClose, onCardsChanged, setError, onMessa
                     croatianSentence: event.target.value,
                     targetText: "",
                     targetStart: undefined,
-                    targetEnd: undefined
+                    targetEnd: undefined,
+                    createAudioOnlyCard: false
                   });
                   setPendingEditSelection(null);
                 }}
@@ -361,6 +365,16 @@ export function CardEditModal({ card, onClose, onCardsChanged, setError, onMessa
               />
             </label>
           </div>
+
+          <label className={`checkline setting-check audio-only-check ${editHasCurrentAudio ? "" : "disabled"}`}>
+            <input
+              type="checkbox"
+              checked={editHasCurrentAudio && editDraft.createAudioOnlyCard}
+              disabled={!editHasCurrentAudio}
+              onChange={(event) => updateEditDraft({ createAudioOnlyCard: event.target.checked })}
+            />
+            Create audio-only card as well
+          </label>
 
           <div className="mine-preview">
             <TargetSentence

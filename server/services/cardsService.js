@@ -68,7 +68,9 @@ export function createCard({ type, story, sentence, body }) {
     ),
     note: asCleanString(body.note),
     audioFile: null,
+    createAudioOnlyCard: Boolean(body.createAudioOnlyCard),
     ankiNoteId: null,
+    audioOnlyAnkiNoteId: null,
     syncStatus: "pending",
     syncError: null,
     ...(type === "cloze" ? { ...targetSelection, hint: asCleanString(body.hint) } : {})
@@ -100,6 +102,7 @@ export function updateCardFields(card, body) {
     "English translation is required."
   );
   const sentenceChanged = croatianSentence !== card.croatianSentence;
+  const audioFile = sentenceChanged ? null : card.audioFile || null;
 
   const updated = {
     ...card,
@@ -107,7 +110,8 @@ export function updateCardFields(card, body) {
     croatianSentence,
     englishTranslation,
     note: asCleanString(fieldOrCurrent(body, "note", card.note)),
-    audioFile: sentenceChanged ? null : card.audioFile || null
+    audioFile,
+    createAudioOnlyCard: Boolean(fieldOrCurrent(body, "createAudioOnlyCard", card.createAudioOnlyCard)) && Boolean(audioFile)
   };
   if (type !== "cloze") {
     delete updated.targetText;
@@ -147,4 +151,9 @@ export function queueAnkiNoteDeletion(cardsState, noteId) {
   const existingQueue = Array.isArray(cardsState.deletedAnkiNoteIds) ? cardsState.deletedAnkiNoteIds : [];
   if (!existingQueue.includes(id)) existingQueue.push(id);
   cardsState.deletedAnkiNoteIds = existingQueue;
+}
+
+export function queueCardAnkiNoteDeletions(cardsState, card) {
+  queueAnkiNoteDeletion(cardsState, card.ankiNoteId);
+  queueAnkiNoteDeletion(cardsState, card.audioOnlyAnkiNoteId);
 }

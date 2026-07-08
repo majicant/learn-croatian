@@ -54,6 +54,7 @@ export type MinedCard = {
   hint?: string;
   note?: string;
   audioFile?: string | null;
+  createAudioOnlyCard?: boolean;
   syncStatus: SyncStatus;
   syncError?: string | null;
 };

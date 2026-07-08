@@ -41,6 +41,7 @@ export function AnalysisPanel({
   const [noteOpen, setNoteOpen] = useState(false);
   const [pendingSelection, setPendingSelection] = useState<ClozeSelection | null>(null);
   const [generateAudio, setGenerateAudio] = useState(false);
+  const [createAudioOnlyCard, setCreateAudioOnlyCard] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editingCardId, setEditingCardId] = useState("");
   const [cardEditorMessage, setCardEditorMessage] = useState("");
@@ -58,6 +59,7 @@ export function AnalysisPanel({
     setNoteOpen(false);
     setPendingSelection(null);
     setGenerateAudio(false);
+    setCreateAudioOnlyCard(false);
     setEditingCardId("");
     setCardEditorMessage("");
   }, [sentence?.id]);
@@ -118,7 +120,8 @@ export function AnalysisPanel({
           englishTranslation,
           hint,
           note,
-          generateAudio
+          generateAudio,
+          createAudioOnlyCard: generateAudio && createAudioOnlyCard
         })
       });
       await refreshStoryAndCards();
@@ -128,6 +131,7 @@ export function AnalysisPanel({
       setNoteOpen(false);
       setPendingSelection(null);
       setGenerateAudio(false);
+      setCreateAudioOnlyCard(false);
       setCardEditorMessage("");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Card save failed.");
@@ -295,10 +299,23 @@ export function AnalysisPanel({
               <input
                 type="checkbox"
                 checked={generateAudio}
-                onChange={(event) => setGenerateAudio(event.target.checked)}
+                onChange={(event) => {
+                  const checked = event.target.checked;
+                  setGenerateAudio(checked);
+                  if (!checked) setCreateAudioOnlyCard(false);
+                }}
               />
               <Volume2 size={16} aria-hidden="true" />
               Generate audio
+            </label>
+            <label className={`checkline setting-check audio-only-check ${generateAudio ? "" : "disabled"}`}>
+              <input
+                type="checkbox"
+                checked={generateAudio && createAudioOnlyCard}
+                disabled={!generateAudio}
+                onChange={(event) => setCreateAudioOnlyCard(event.target.checked)}
+              />
+              Create audio-only card as well
             </label>
 
             <div className="mine-preview">

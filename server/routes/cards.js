@@ -2,19 +2,23 @@ import { Router } from "express";
 import { cardForClient, readCards, writeCards } from "../repositories/cardsRepository.js";
 import { findSentence, readStory } from "../repositories/storiesRepository.js";
 import {
+  buildAudioOnlyAnkiNote,
   buildAnkiNote,
   deleteQueuedAnkiNotes,
   ensureAnkiSetup,
+  isCardFullySynced,
   markMissingAnkiNotesForResync,
   recoverExistingAnkiNotes,
-  invokeAnki
+  invokeAnki,
+  shouldCreateAudioOnlyCard,
+  uploadCardAudioForUpdate
 } from "../services/ankiService.js";
 import { addAudioIfRequested } from "../services/audioService.js";
 import {
   cleanCardType,
   createCard,
   isDuplicateCard,
-  queueAnkiNoteDeletion,
+  queueCardAnkiNoteDeletions,
   updateCardFields
 } from "../services/cardsService.js";
 import { readSettings } from "../repositories/settingsRepository.js";
@@ -46,6 +50,7 @@ cardsRouter.post("/", async (request, response, next) => {
     }
 
     await addAudioIfRequested(draft, Boolean(request.body.generateAudio));
+    if (!draft.audioFile) draft.createAudioOnlyCard = false;
     cardsState.cards.push(draft);
     await writeCards(cardsState);
     response.status(201).end();
@@ -68,9 +73,10 @@ cardsRouter.patch("/:id", async (request, response, next) => {
       return response.status(409).json({ error: "A matching card already exists." });
     }
 
-    if (current.ankiNoteId) {
-      queueAnkiNoteDeletion(cardsState, current.ankiNoteId);
+    if (current.ankiNoteId || current.audioOnlyAnkiNoteId) {
+      queueCardAnkiNoteDeletions(cardsState, current);
       updated.ankiNoteId = null;
+      updated.audioOnlyAnkiNoteId = null;
     }
 
     updated.syncStatus = "pending";
@@ -90,7 +96,7 @@ cardsRouter.delete("/:id", async (request, response, next) => {
     if (!card) {
       return response.status(404).json({ error: "Card not found." });
     }
-    if (card.ankiNoteId) queueAnkiNoteDeletion(cardsState, card.ankiNoteId);
+    queueCardAnkiNoteDeletions(cardsState, card);
 
     const nextCards = cardsState.cards.filter((item) => item.id !== request.params.id);
     cardsState.cards = nextCards;
@@ -110,47 +116,90 @@ cardsRouter.post("/sync", async (_request, response, next) => {
     const deleted = await deleteQueuedAnkiNotes(cardsState, settings);
     const missing = await markMissingAnkiNotesForResync(cardsState, settings);
     const recovered = await recoverExistingAnkiNotes(cardsState, settings);
-    const cardsToSync = cardsState.cards.filter((card) => !card.ankiNoteId);
+    const failedMessages = new Map();
+    const touchedCards = new Set();
+    let synced = 0;
+    let failed = 0;
 
-    if (!cardsToSync.length) {
+    function recordFailure(job, message) {
+      const prefix = job.kind === "audioOnly" ? "Audio-only card" : "Card";
+      const messages = failedMessages.get(job.card.id) || [];
+      messages.push(`${prefix}: ${message}`);
+      failedMessages.set(job.card.id, messages);
+    }
+
+    async function addSyncJobs(syncJobs) {
+      if (!syncJobs.length) return;
+
+      for (const job of syncJobs) {
+        touchedCards.add(job.card);
+      }
+
+      const notes = syncJobs.map((job) => job.note);
+      const canAdd = await invokeAnki("canAddNotesWithErrorDetail", { notes }, settings.ankiUrl);
+      const addableNotes = [];
+      const addableJobs = [];
+
+      for (let index = 0; index < syncJobs.length; index += 1) {
+        const check = canAdd[index];
+        const job = syncJobs[index];
+        if (check?.canAdd) {
+          addableNotes.push(notes[index]);
+          addableJobs.push(job);
+        } else {
+          failed += 1;
+          recordFailure(job, check?.error || "Anki rejected this card.");
+        }
+      }
+
+      if (!addableNotes.length) return;
+
+      const noteIds = await invokeAnki("addNotes", { notes: addableNotes }, settings.ankiUrl);
+      for (let index = 0; index < addableJobs.length; index += 1) {
+        const noteId = noteIds[index];
+        const job = addableJobs[index];
+        if (noteId) {
+          synced += 1;
+          if (job.kind === "audioOnly") {
+            job.card.audioOnlyAnkiNoteId = noteId;
+          } else {
+            job.card.ankiNoteId = noteId;
+          }
+        } else {
+          failed += 1;
+          recordFailure(job, "Anki did not return a note id.");
+        }
+      }
+    }
+
+    const mainJobs = cardsState.cards
+      .filter((card) => !card.ankiNoteId)
+      .map((card) => ({ card, kind: "main", note: buildAnkiNote(card, settings) }));
+
+    await addSyncJobs(mainJobs);
+
+    const audioOnlyJobs = [];
+    for (const card of cardsState.cards) {
+      if (!card.ankiNoteId || !shouldCreateAudioOnlyCard(card) || card.audioOnlyAnkiNoteId) continue;
+      await uploadCardAudioForUpdate(card, settings);
+      audioOnlyJobs.push({ card, kind: "audioOnly", note: buildAudioOnlyAnkiNote(card, settings) });
+    }
+
+    await addSyncJobs(audioOnlyJobs);
+
+    if (!touchedCards.size) {
       await writeCards(cardsState);
       return response.json({ synced: 0, failed: 0, recreated: missing, recovered, deleted });
     }
 
-    const notes = cardsToSync.map((card) => buildAnkiNote(card, settings));
-    const canAdd = await invokeAnki("canAddNotesWithErrorDetail", { notes }, settings.ankiUrl);
-    const addableNotes = [];
-    const addableCards = [];
-    let failed = 0;
-
-    for (let index = 0; index < cardsToSync.length; index += 1) {
-      const check = canAdd[index];
-      if (check?.canAdd) {
-        addableNotes.push(notes[index]);
-        addableCards.push(cardsToSync[index]);
+    for (const card of touchedCards) {
+      const messages = failedMessages.get(card.id) || [];
+      if (messages.length) {
+        card.syncStatus = "error";
+        card.syncError = messages.join(" ");
       } else {
-        failed += 1;
-        cardsToSync[index].syncStatus = "error";
-        cardsToSync[index].syncError = check?.error || "Anki rejected this card.";
-      }
-    }
-
-    let synced = 0;
-    if (addableNotes.length) {
-      const noteIds = await invokeAnki("addNotes", { notes: addableNotes }, settings.ankiUrl);
-      for (let index = 0; index < addableCards.length; index += 1) {
-        const noteId = noteIds[index];
-        const card = addableCards[index];
-        if (noteId) {
-          synced += 1;
-          card.ankiNoteId = noteId;
-          card.syncStatus = "synced";
-          card.syncError = null;
-        } else {
-          failed += 1;
-          card.syncStatus = "error";
-          card.syncError = "Anki did not return a note id.";
-        }
+        card.syncStatus = isCardFullySynced(card) ? "synced" : "pending";
+        card.syncError = null;
       }
     }
 

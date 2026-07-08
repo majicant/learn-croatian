@@ -1197,6 +1197,15 @@ h4 {
   margin: 0;
 }
 
+.audio-only-check {
+  margin-top: -0.45rem;
+}
+
+.setting-check.disabled {
+  color: var(--muted);
+  opacity: 0.62;
+}
+
 @media (max-width: 980px) {
   .reader-grid,
   .import-view {

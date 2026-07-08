@@ -21,7 +21,9 @@ export async function deleteCardsForStories(storyIds) {
   const storyIdSet = new Set(storyIds);
   const cardsState = await readCards();
   const deletedCards = cardsState.cards.filter((card) => storyIdSet.has(card.storyId));
-  const deletedAnkiNoteIds = deletedCards.map((card) => card.ankiNoteId).filter(Boolean);
+  const deletedAnkiNoteIds = deletedCards
+    .flatMap((card) => [card.ankiNoteId, card.audioOnlyAnkiNoteId])
+    .filter(Boolean);
 
   cardsState.cards = cardsState.cards.filter((card) => !storyIdSet.has(card.storyId));
   cardsState.deletedAnkiNoteIds = [...cardsState.deletedAnkiNoteIds, ...deletedAnkiNoteIds];
@@ -29,6 +31,6 @@ export async function deleteCardsForStories(storyIds) {
 }
 
 export function cardForClient(card) {
-  const { ankiNoteId, ...clientCard } = card;
+  const { ankiNoteId, audioOnlyAnkiNoteId, ...clientCard } = card;
   return clientCard;
 }

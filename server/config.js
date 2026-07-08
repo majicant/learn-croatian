@@ -14,6 +14,7 @@ export const storyFoldersFile = path.join(dataDir, "story-folders.json");
 
 export const basicModelName = "Learn Croatian Basic";
 export const clozeModelName = "Learn Croatian Cloze";
+export const audioOnlyModelName = "Learn Croatian Audio";
 
 export const defaultSettings = {
   ankiUrl: "http://127.0.0.1:8765",
