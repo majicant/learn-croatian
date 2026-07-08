@@ -1,5 +1,5 @@
-import { Pencil, Save, Send, Trash2, Volume2, X } from "lucide-react";
-import { useRef, useState } from "react";
+import { Save, Send, Trash2, Volume2, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { apiJson } from "../../api/client";
 import { isSynced, syncLabel } from "../../domain/cards";
 import type { CardType, MinedCard } from "../../types";
@@ -66,6 +66,34 @@ export function CardsView({ cards, reloadCards, setError }: CardsProps) {
   const syncedCards = cards.filter(isSynced);
   const activeCardsTab: CardsTab = selectedCardsTab || (pendingCount > 0 ? "pending" : "synced");
   const visibleCards = activeCardsTab === "pending" ? pendingCards : syncedCards;
+  const editingCard = cards.find((card) => card.id === editingId) || null;
+
+  useEffect(() => {
+    if (!editingId || editingCard) return;
+    cancelEdit();
+  }, [editingCard, editingId]);
+
+  useEffect(() => {
+    if (!editingId) return;
+
+    window.requestAnimationFrame(() => editTextareaRef.current?.focus());
+  }, [editingId]);
+
+  useEffect(() => {
+    if (!editingId) return;
+
+    const originalOverflow = document.body.style.overflow;
+    function closeOnEscape(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape" && !savingEdit) cancelEdit();
+    }
+
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [editingId, savingEdit]);
 
   async function syncCards() {
     setSyncing(true);
@@ -205,192 +233,256 @@ export function CardsView({ cards, reloadCards, setError }: CardsProps) {
     }
   }
 
-  function renderCard(card: MinedCard) {
-    const isEditing = editingId === card.id && editDraft;
-    const editNeedsHiddenText = editDraft?.type === "cloze";
-    const editTargetInSentence = Boolean(
-      editDraft &&
-        hasValidTargetRange(editDraft.croatianSentence, editDraft.targetText, editDraft.targetStart, editDraft.targetEnd)
+  function renderEditModal() {
+    if (!editingCard || !editDraft) return null;
+
+    const editNeedsHiddenText = editDraft.type === "cloze";
+    const editTargetInSentence = hasValidTargetRange(
+      editDraft.croatianSentence,
+      editDraft.targetText,
+      editDraft.targetStart,
+      editDraft.targetEnd
     );
     const canSaveEdit = Boolean(
-      editDraft &&
-        editDraft.croatianSentence &&
+      editDraft.croatianSentence &&
         editDraft.englishTranslation &&
         !savingEdit &&
         (!editNeedsHiddenText || (editDraft.targetText && editTargetInSentence))
     );
 
     return (
-      <article className={`card-row ${isEditing ? "editing" : ""}`} key={card.id}>
-        <div className="card-row-main">
-          <div className="card-row-head">
-            <span className="pill">{card.type}</span>
-            <strong>{card.type === "basic" ? "Croatian to English" : card.targetText}</strong>
-          </div>
-
-          {isEditing ? (
-            <form className="card-edit-form" onSubmit={(event) => {
-              event.preventDefault();
-              void saveEdit(card);
-            }}>
-              <label>
-                Type
-                <select
-                  value={editDraft.type}
-                  onChange={(event) => {
-                    const nextType = event.target.value as CardType;
-                    updateEditDraft({
-                      type: nextType,
-                      targetText: nextType === "cloze" ? editDraft.targetText : "",
-                      targetStart: nextType === "cloze" ? editDraft.targetStart : undefined,
-                      targetEnd: nextType === "cloze" ? editDraft.targetEnd : undefined,
-                      hint: nextType === "cloze" ? editDraft.hint : ""
-                    });
-                  }}
-                >
-                  <option value="basic">Basic</option>
-                  <option value="cloze">Cloze</option>
-                </select>
-              </label>
-
-              <div className="card-face-group">
-                <h4>Front</h4>
-                <label>
-                  Croatian sentence
-                  <textarea
-                    ref={editTextareaRef}
-                    value={editDraft.croatianSentence}
-                    onChange={(event) => {
-                      updateEditDraft({
-                        croatianSentence: event.target.value,
-                        targetText: "",
-                        targetStart: undefined,
-                        targetEnd: undefined
-                      });
-                      setPendingEditSelection(null);
+      <div
+        className="card-modal-backdrop"
+        onMouseDown={(event) => {
+          if (event.target === event.currentTarget && !savingEdit) cancelEdit();
+        }}
+      >
+        <section className="card-modal" role="dialog" aria-modal="true" aria-labelledby="card-edit-title">
+          <div className="card-modal-head">
+            <div>
+              <div className="card-modal-kicker">
+                <span className="pill">{editingCard.type}</span>
+                <span className={`sync-pill ${editingCard.syncStatus}`}>{syncLabel(editingCard)}</span>
+                {editingCard.audioFile && (
+                  <button
+                    className="audio-play"
+                    type="button"
+                    onClick={() => {
+                      void playAudio(editingCard);
                     }}
-                    onKeyUp={captureEditSelection}
-                    onMouseUp={captureEditSelection}
-                    onPointerUp={captureEditSelection}
-                    onSelect={captureEditSelection}
-                    onTouchEnd={captureEditSelection}
-                    rows={3}
-                  />
-                </label>
-
-                {editNeedsHiddenText && (
-                  <>
-                    <div className="target-row">
-                      <div className={`target-summary ${editDraft.targetText ? "selected" : ""}`} aria-live="polite">
-                        <div className="target-summary-head">
-                          <span>Hidden text</span>
-                          {editDraft.targetText && (
-                            <button
-                              type="button"
-                              className="target-clear-button"
-                              onClick={clearEditTargetSelection}
-                              title="Clear hidden text"
-                              aria-label="Clear hidden text"
-                            >
-                              <X size={14} aria-hidden="true" />
-                            </button>
-                          )}
-                        </div>
-                        <strong className={editDraft.targetText ? "" : "empty"}>
-                          {editDraft.targetText || "None selected"}
-                        </strong>
-                      </div>
-                      <button
-                        type="button"
-                        className="secondary target-hide-button"
-                        disabled={!pendingEditSelection}
-                        onMouseDown={(event) => event.preventDefault()}
-                        onClick={hideEditSelection}
-                      >
-                        {editDraft.targetText ? "Replace" : "Hide selection"}
-                      </button>
-                    </div>
-                    {editDraft.targetText && !editTargetInSentence && (
-                      <p className="field-error">Hidden text must match the Croatian text exactly.</p>
-                    )}
-
-                    <label>
-                      Hint (optional)
-                      <input
-                        value={editDraft.hint}
-                        onChange={(event) => updateEditDraft({ hint: event.target.value })}
-                        placeholder="e.g. to buy"
-                      />
-                    </label>
-                  </>
+                    disabled={playingId === editingCard.id}
+                  >
+                    <Volume2 size={13} aria-hidden="true" />
+                    {playingId === editingCard.id ? "Playing" : "Audio"}
+                  </button>
                 )}
               </div>
+              <h2 id="card-edit-title">Edit card</h2>
+              <p>{editingCard.type === "basic" ? "Croatian to English" : editingCard.targetText || "Cloze card"}</p>
+            </div>
+            <button
+              type="button"
+              className="icon-button"
+              onClick={cancelEdit}
+              disabled={savingEdit}
+              title="Close editor"
+              aria-label="Close editor"
+            >
+              <X size={18} aria-hidden="true" />
+            </button>
+          </div>
 
-              <div className="card-face-group">
-                <h4>Back</h4>
-                <label>
-                  English
-                  <textarea
-                    value={editDraft.englishTranslation}
-                    onChange={(event) => updateEditDraft({ englishTranslation: event.target.value })}
-                    rows={2}
-                  />
-                </label>
+          <form
+            className="card-edit-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void saveEdit(editingCard);
+            }}
+          >
+            <label>
+              Type
+              <select
+                value={editDraft.type}
+                onChange={(event) => {
+                  const nextType = event.target.value as CardType;
+                  updateEditDraft({
+                    type: nextType,
+                    targetText: nextType === "cloze" ? editDraft.targetText : "",
+                    targetStart: nextType === "cloze" ? editDraft.targetStart : undefined,
+                    targetEnd: nextType === "cloze" ? editDraft.targetEnd : undefined,
+                    hint: nextType === "cloze" ? editDraft.hint : ""
+                  });
+                }}
+              >
+                <option value="basic">Basic</option>
+                <option value="cloze">Cloze</option>
+              </select>
+            </label>
 
-                <label>
-                  Notes
-                  <textarea value={editDraft.note} onChange={(event) => updateEditDraft({ note: event.target.value })} rows={2} />
-                </label>
-              </div>
-
-              <div className="mine-preview">
-                <TargetSentence
-                  sentence={editDraft.croatianSentence}
-                  target={editNeedsHiddenText ? editDraft.targetText : ""}
-                  targetStart={editNeedsHiddenText ? editDraft.targetStart : undefined}
-                  targetEnd={editNeedsHiddenText ? editDraft.targetEnd : undefined}
+            <div className="card-face-group">
+              <h4>Front</h4>
+              <label>
+                Croatian sentence
+                <textarea
+                  ref={editTextareaRef}
+                  value={editDraft.croatianSentence}
+                  onChange={(event) => {
+                    updateEditDraft({
+                      croatianSentence: event.target.value,
+                      targetText: "",
+                      targetStart: undefined,
+                      targetEnd: undefined
+                    });
+                    setPendingEditSelection(null);
+                  }}
+                  onKeyUp={captureEditSelection}
+                  onMouseUp={captureEditSelection}
+                  onPointerUp={captureEditSelection}
+                  onSelect={captureEditSelection}
+                  onTouchEnd={captureEditSelection}
+                  rows={3}
                 />
-              </div>
+              </label>
 
-              <div className="button-row card-edit-actions">
-                <button type="submit" disabled={!canSaveEdit}>
-                  <Save size={16} aria-hidden="true" />
-                  {savingEdit ? "Saving..." : "Save changes"}
-                </button>
-                <button type="button" className="secondary" onClick={cancelEdit}>
-                  <X size={16} aria-hidden="true" />
-                  Cancel
-                </button>
-              </div>
-            </form>
-          ) : (
-            <>
-              <p>{card.croatianSentence}</p>
-              <p className="muted">{card.englishTranslation}</p>
-              {card.hint && <p className="muted">Hint: {card.hint}</p>}
-              {card.note && <p className="muted">{card.note}</p>}
-              {card.syncError && card.syncStatus !== "synced" && <p className="field-error">{card.syncError}</p>}
-            </>
+              {editNeedsHiddenText && (
+                <>
+                  <div className="target-row">
+                    <div className={`target-summary ${editDraft.targetText ? "selected" : ""}`} aria-live="polite">
+                      <div className="target-summary-head">
+                        <span>Hidden text</span>
+                        {editDraft.targetText && (
+                          <button
+                            type="button"
+                            className="target-clear-button"
+                            onClick={clearEditTargetSelection}
+                            title="Clear hidden text"
+                            aria-label="Clear hidden text"
+                          >
+                            <X size={14} aria-hidden="true" />
+                          </button>
+                        )}
+                      </div>
+                      <strong className={editDraft.targetText ? "" : "empty"}>
+                        {editDraft.targetText || "None selected"}
+                      </strong>
+                    </div>
+                    <button
+                      type="button"
+                      className="secondary target-hide-button"
+                      disabled={!pendingEditSelection}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={hideEditSelection}
+                    >
+                      {editDraft.targetText ? "Replace" : "Hide selection"}
+                    </button>
+                  </div>
+                  {editDraft.targetText && !editTargetInSentence && (
+                    <p className="field-error">Hidden text must match the Croatian text exactly.</p>
+                  )}
+
+                  <label>
+                    Hint (optional)
+                    <input
+                      value={editDraft.hint}
+                      onChange={(event) => updateEditDraft({ hint: event.target.value })}
+                      placeholder="e.g. to buy"
+                    />
+                  </label>
+                </>
+              )}
+            </div>
+
+            <div className="card-face-group">
+              <h4>Back</h4>
+              <label>
+                English
+                <textarea
+                  value={editDraft.englishTranslation}
+                  onChange={(event) => updateEditDraft({ englishTranslation: event.target.value })}
+                  rows={2}
+                />
+              </label>
+
+              <label>
+                Notes
+                <textarea
+                  value={editDraft.note}
+                  onChange={(event) => updateEditDraft({ note: event.target.value })}
+                  rows={2}
+                />
+              </label>
+            </div>
+
+            <div className="mine-preview">
+              <TargetSentence
+                sentence={editDraft.croatianSentence}
+                target={editNeedsHiddenText ? editDraft.targetText : ""}
+                targetStart={editNeedsHiddenText ? editDraft.targetStart : undefined}
+                targetEnd={editNeedsHiddenText ? editDraft.targetEnd : undefined}
+              />
+            </div>
+
+            <div className="button-row card-edit-actions">
+              <button type="submit" disabled={!canSaveEdit}>
+                <Save size={16} aria-hidden="true" />
+                {savingEdit ? "Saving..." : "Save changes"}
+              </button>
+              <button type="button" className="secondary" onClick={cancelEdit} disabled={savingEdit}>
+                <X size={16} aria-hidden="true" />
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="danger"
+                onClick={() => void deleteCard(editingCard)}
+                disabled={savingEdit}
+              >
+                <Trash2 size={16} aria-hidden="true" />
+                Delete
+              </button>
+            </div>
+          </form>
+        </section>
+      </div>
+    );
+  }
+
+  function renderCard(card: MinedCard) {
+    return (
+      <article className="card-row" key={card.id}>
+        <button
+          className="card-row-open"
+          type="button"
+          onClick={() => startEdit(card)}
+          aria-label={`Edit card: ${card.croatianSentence}`}
+        >
+          <span className="card-row-head">
+            <span className="pill">{card.type}</span>
+            <strong>{card.type === "basic" ? "Croatian to English" : card.targetText}</strong>
+          </span>
+          <span className="card-row-text">{card.croatianSentence}</span>
+          <span className="card-row-text muted">{card.englishTranslation}</span>
+          {card.hint && <span className="card-row-text muted">Hint: {card.hint}</span>}
+          {card.note && <span className="card-row-text muted">{card.note}</span>}
+          {card.syncError && card.syncStatus !== "synced" && (
+            <span className="card-row-error field-error">{card.syncError}</span>
           )}
-        </div>
+        </button>
         <div className="card-row-actions">
           <span className={`sync-pill ${card.syncStatus}`}>{syncLabel(card)}</span>
           {card.audioFile && (
-            <button className="audio-play" type="button" onClick={() => void playAudio(card)} disabled={playingId === card.id}>
+            <button
+              className="audio-play"
+              type="button"
+              onClick={() => {
+                void playAudio(card);
+              }}
+              disabled={playingId === card.id}
+            >
               <Volume2 size={13} aria-hidden="true" />
               {playingId === card.id ? "Playing" : "Audio"}
             </button>
           )}
-          {!isEditing && (
-            <button className="secondary icon-text" onClick={() => startEdit(card)}>
-              <Pencil size={16} aria-hidden="true" />
-              Edit
-            </button>
-          )}
-          <button className="danger icon-text" onClick={() => void deleteCard(card)}>
-            <Trash2 size={16} aria-hidden="true" />
-            Delete
-          </button>
         </div>
       </article>
     );
@@ -448,6 +540,7 @@ export function CardsView({ cards, reloadCards, setError }: CardsProps) {
           </section>
         </>
       )}
+      {renderEditModal()}
     </main>
   );
 }
