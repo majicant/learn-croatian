@@ -41,6 +41,17 @@ export async function generateAudio({ text, cardId }) {
   return audioFile;
 }
 
+export async function deleteAudioFile(audioFile) {
+  const fileName = String(audioFile || "");
+  if (!fileName || path.basename(fileName) !== fileName) return;
+
+  try {
+    await fs.unlink(path.join(mediaDir, fileName));
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+}
+
 export async function addAudioIfRequested(card, shouldGenerateAudio) {
   if (!shouldGenerateAudio) return;
   try {

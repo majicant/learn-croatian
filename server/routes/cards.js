@@ -13,7 +13,7 @@ import {
   shouldCreateAudioOnlyCard,
   uploadCardAudioForUpdate
 } from "../services/ankiService.js";
-import { addAudioIfRequested } from "../services/audioService.js";
+import { addAudioIfRequested, deleteAudioFile, generateAudio } from "../services/audioService.js";
 import {
   cleanCardType,
   createCard,
@@ -24,6 +24,14 @@ import {
 import { readSettings } from "../repositories/settingsRepository.js";
 
 export const cardsRouter = Router();
+
+function cleanAudioResolution(value) {
+  if (value === undefined || value === null || value === "") return "";
+  if (value === "regenerate" || value === "remove") return value;
+  const error = new Error("Audio resolution must be regenerate or remove.");
+  error.status = 400;
+  throw error;
+}
 
 cardsRouter.get("/", async (_request, response, next) => {
   try {
@@ -68,9 +76,45 @@ cardsRouter.patch("/:id", async (request, response, next) => {
     }
 
     const current = cardsState.cards[index];
-    const updated = updateCardFields(current, request.body || {});
+    const body = request.body || {};
+    const audioResolution = cleanAudioResolution(body.audioResolution);
+    const wantsAudio =
+      body.generateAudio === undefined
+        ? audioResolution !== "remove" && Boolean(current.audioFile)
+        : Boolean(body.generateAudio);
+    const updated = updateCardFields(current, body);
     if (isDuplicateCard(cardsState.cards, updated, current.id)) {
       return response.status(409).json({ error: "A matching card already exists." });
+    }
+
+    const croatianTextChangedWithAudio = Boolean(current.audioFile && updated.croatianSentence !== current.croatianSentence);
+    const shouldDeleteAudio = Boolean(current.audioFile && !wantsAudio);
+    const shouldRegenerateAudio = Boolean(croatianTextChangedWithAudio && wantsAudio);
+    const shouldGenerateAudio = Boolean(!current.audioFile && wantsAudio);
+
+    if (shouldDeleteAudio && audioResolution !== "remove") {
+      return response.status(409).json({
+        error: "Saving with Generate audio off will delete the existing audio. Confirm this choice first."
+      });
+    }
+
+    if (shouldRegenerateAudio && audioResolution !== "regenerate") {
+      return response.status(409).json({
+        error: "Croatian text changed. Regenerate the existing audio or cancel this edit."
+      });
+    }
+
+    if (shouldDeleteAudio) {
+      await deleteAudioFile(current.audioFile);
+      updated.audioFile = null;
+      updated.createAudioOnlyCard = false;
+    } else if (shouldRegenerateAudio || shouldGenerateAudio) {
+      updated.audioFile = await generateAudio({ text: updated.croatianSentence, cardId: updated.id });
+      updated.createAudioOnlyCard = Boolean(body.createAudioOnlyCard ?? current.createAudioOnlyCard);
+      if (shouldRegenerateAudio && current.audioFile !== updated.audioFile) await deleteAudioFile(current.audioFile);
+    } else if (!wantsAudio) {
+      updated.audioFile = null;
+      updated.createAudioOnlyCard = false;
     }
 
     if (current.ankiNoteId || current.audioOnlyAnkiNoteId) {

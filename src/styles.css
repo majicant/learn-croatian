@@ -1183,6 +1183,99 @@ h4 {
   gap: 0.4rem;
 }
 
+.confirm-dialog-backdrop {
+  align-items: center;
+  background: rgba(36, 39, 34, 0.36);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 1rem;
+  position: fixed;
+  z-index: 80;
+}
+
+.confirm-dialog {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: 0 20px 54px rgba(39, 43, 36, 0.26);
+  display: grid;
+  gap: 0.85rem;
+  max-height: calc(100vh - 2rem);
+  max-width: min(560px, 100%);
+  overflow: auto;
+  padding: 1rem;
+  width: min(560px, 100%);
+}
+
+.confirm-dialog-head {
+  align-items: start;
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.confirm-dialog-head h3 {
+  color: var(--ink);
+  font-size: 1rem;
+  letter-spacing: 0;
+  line-height: 1.2;
+  margin: 0 0 0.2rem;
+  text-transform: none;
+}
+
+.confirm-dialog-head p {
+  color: var(--muted);
+  margin-bottom: 0;
+}
+
+.warning-icon {
+  align-items: center;
+  background: #fff2d9;
+  border: 1px solid #e7c889;
+  color: var(--warning);
+  display: inline-flex;
+  justify-content: center;
+  min-height: 2.15rem;
+  min-width: 2.15rem;
+}
+
+.audio-warning-compare {
+  background: #f8f8f1;
+  border: 1px solid var(--border);
+  display: grid;
+  gap: 0.65rem;
+  padding: 0.7rem;
+}
+
+.audio-warning-compare div {
+  display: grid;
+  gap: 0.18rem;
+}
+
+.audio-warning-compare span {
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 760;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.audio-warning-compare p {
+  color: var(--ink);
+  margin-bottom: 0;
+  overflow-wrap: anywhere;
+}
+
+.confirm-actions {
+  justify-content: flex-end;
+  margin-top: 0;
+}
+
+.confirm-actions .danger {
+  margin-left: 0;
+}
+
 .card-modal .card-edit-form {
   gap: 0.9rem;
 }
@@ -1281,6 +1374,20 @@ h4 {
 
   .card-modal {
     max-height: calc(100vh - 1.5rem);
+  }
+
+  .confirm-dialog-backdrop {
+    align-items: stretch;
+    padding: 0.75rem;
+  }
+
+  .confirm-dialog {
+    align-self: center;
+    max-height: calc(100vh - 1.5rem);
+  }
+
+  .confirm-actions {
+    display: grid;
   }
 
   .card-edit-actions .danger {

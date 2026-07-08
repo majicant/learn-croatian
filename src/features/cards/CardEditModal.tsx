@@ -1,4 +1,4 @@
-import { Save, Trash2, Volume2, X } from "lucide-react";
+import { AlertTriangle, Save, Trash2, Volume2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { apiJson } from "../../api/client";
@@ -23,6 +23,7 @@ type CardEditDraft = {
   englishTranslation: string;
   hint: string;
   note: string;
+  generateAudio: boolean;
   createAudioOnlyCard: boolean;
 };
 
@@ -31,6 +32,9 @@ type ClozeSelection = {
   end: number;
   text: string;
 };
+
+type AudioEditResolution = "regenerate" | "remove";
+type AudioWarningMode = "delete" | "regenerate";
 
 function hasValidTargetRange(sentence: string, target: string, targetStart?: number, targetEnd?: number) {
   if (!target || !Number.isInteger(targetStart) || !Number.isInteger(targetEnd)) return false;
@@ -49,6 +53,7 @@ function cardToEditDraft(card: MinedCard): CardEditDraft {
     englishTranslation: card.englishTranslation,
     hint: card.hint || "",
     note: card.note || "",
+    generateAudio: Boolean(card.audioFile),
     createAudioOnlyCard: Boolean(card.createAudioOnlyCard && card.audioFile)
   };
 }
@@ -57,12 +62,14 @@ export function CardEditModal({ card, onClose, onCardsChanged, setError, onMessa
   const editTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [editDraft, setEditDraft] = useState<CardEditDraft>(() => cardToEditDraft(card));
   const [pendingEditSelection, setPendingEditSelection] = useState<ClozeSelection | null>(null);
+  const [audioWarningMode, setAudioWarningMode] = useState<AudioWarningMode | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
   const [playingId, setPlayingId] = useState("");
 
   useEffect(() => {
     setEditDraft(cardToEditDraft(card));
     setPendingEditSelection(null);
+    setAudioWarningMode(null);
     setSavingEdit(false);
   }, [card]);
 
@@ -74,7 +81,12 @@ export function CardEditModal({ card, onClose, onCardsChanged, setError, onMessa
   useEffect(() => {
     const originalOverflow = document.body.style.overflow;
     function closeOnEscape(event: globalThis.KeyboardEvent) {
-      if (event.key === "Escape" && !savingEdit) onClose();
+      if (event.key !== "Escape" || savingEdit) return;
+      if (audioWarningMode) {
+        setAudioWarningMode(null);
+        return;
+      }
+      onClose();
     }
 
     document.body.style.overflow = "hidden";
@@ -83,7 +95,7 @@ export function CardEditModal({ card, onClose, onCardsChanged, setError, onMessa
       document.body.style.overflow = originalOverflow;
       window.removeEventListener("keydown", closeOnEscape);
     };
-  }, [card.id, savingEdit]);
+  }, [audioWarningMode, card.id, onClose, savingEdit]);
 
   function updateEditDraft(next: Partial<CardEditDraft>) {
     setEditDraft((current) => ({ ...current, ...next }));
@@ -122,20 +134,51 @@ export function CardEditModal({ card, onClose, onCardsChanged, setError, onMessa
     setPendingEditSelection(null);
   }
 
-  async function saveEdit() {
+  function getAudioWarningMode() {
+    if (!card.audioFile) return null;
+    if (!editDraft.generateAudio) return "delete";
+    if (editDraft.croatianSentence !== card.croatianSentence) return "regenerate";
+    return null;
+  }
+
+  async function saveEdit(audioResolution?: AudioEditResolution) {
+    const nextAudioWarningMode = getAudioWarningMode();
+    if (nextAudioWarningMode === "delete" && audioResolution !== "remove") {
+      setAudioWarningMode("delete");
+      return;
+    }
+
+    if (nextAudioWarningMode === "regenerate" && audioResolution !== "regenerate") {
+      setAudioWarningMode("regenerate");
+      return;
+    }
+
     let closed = false;
+    setAudioWarningMode(null);
     setSavingEdit(true);
     setError("");
     onMessage?.("");
     try {
       await apiJson(`/api/cards/${card.id}`, {
         method: "PATCH",
-        body: JSON.stringify(editDraft)
+        body: JSON.stringify({
+          ...editDraft,
+          ...(audioResolution ? { audioResolution } : {}),
+          createAudioOnlyCard: editDraft.generateAudio && audioResolution !== "remove" ? editDraft.createAudioOnlyCard : false
+        })
       });
       onClose();
       closed = true;
       await onCardsChanged();
-      onMessage?.(isSynced(card) ? "Saved. Sync to replace the Anki card." : "Saved.");
+      const savedMessage =
+        audioResolution === "regenerate"
+          ? "Saved with regenerated audio."
+          : audioResolution === "remove"
+            ? "Saved without audio."
+            : !card.audioFile && editDraft.generateAudio
+              ? "Saved with generated audio."
+              : "Saved.";
+      onMessage?.(isSynced(card) ? `${savedMessage} Sync to replace the Anki card.` : savedMessage);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Card update failed.");
     } finally {
@@ -188,7 +231,8 @@ export function CardEditModal({ card, onClose, onCardsChanged, setError, onMessa
   }
 
   const editNeedsHiddenText = editDraft.type === "cloze";
-  const editHasCurrentAudio = Boolean(card.audioFile && editDraft.croatianSentence === card.croatianSentence);
+  const showAudioDeleteWarning = audioWarningMode === "delete";
+  const showAudioRegenerateWarning = audioWarningMode === "regenerate";
   const editTargetInSentence = hasValidTargetRange(
     editDraft.croatianSentence,
     editDraft.targetText,
@@ -206,7 +250,7 @@ export function CardEditModal({ card, onClose, onCardsChanged, setError, onMessa
     <div
       className="card-modal-backdrop"
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget && !savingEdit) onClose();
+        if (event.target === event.currentTarget && !savingEdit && !audioWarningMode) onClose();
       }}
     >
       <section className="card-modal" role="dialog" aria-modal="true" aria-labelledby="card-edit-title">
@@ -283,8 +327,7 @@ export function CardEditModal({ card, onClose, onCardsChanged, setError, onMessa
                     croatianSentence: event.target.value,
                     targetText: "",
                     targetStart: undefined,
-                    targetEnd: undefined,
-                    createAudioOnlyCard: false
+                    targetEnd: undefined
                   });
                   setPendingEditSelection(null);
                 }}
@@ -366,11 +409,26 @@ export function CardEditModal({ card, onClose, onCardsChanged, setError, onMessa
             </label>
           </div>
 
-          <label className={`checkline setting-check audio-only-check ${editHasCurrentAudio ? "" : "disabled"}`}>
+          <label className="checkline setting-check">
             <input
               type="checkbox"
-              checked={editHasCurrentAudio && editDraft.createAudioOnlyCard}
-              disabled={!editHasCurrentAudio}
+              checked={editDraft.generateAudio}
+              onChange={(event) => {
+                const checked = event.target.checked;
+                updateEditDraft({
+                  generateAudio: checked,
+                  createAudioOnlyCard: checked ? editDraft.createAudioOnlyCard : false
+                });
+              }}
+            />
+            <Volume2 size={16} aria-hidden="true" />
+            Generate audio
+          </label>
+          <label className={`checkline setting-check audio-only-check ${editDraft.generateAudio ? "" : "disabled"}`}>
+            <input
+              type="checkbox"
+              checked={editDraft.generateAudio && editDraft.createAudioOnlyCard}
+              disabled={!editDraft.generateAudio}
               onChange={(event) => updateEditDraft({ createAudioOnlyCard: event.target.checked })}
             />
             Create audio-only card as well
@@ -401,6 +459,82 @@ export function CardEditModal({ card, onClose, onCardsChanged, setError, onMessa
           </div>
         </form>
       </section>
+
+      {audioWarningMode && (
+        <div className="confirm-dialog-backdrop" role="presentation">
+          <section
+            className="confirm-dialog audio-text-warning"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="audio-warning-title"
+            aria-describedby="audio-warning-description"
+          >
+            <div className="confirm-dialog-head">
+              <span className="warning-icon" aria-hidden="true">
+                <AlertTriangle size={20} />
+              </span>
+              <div>
+                <h3 id="audio-warning-title">
+                  {showAudioDeleteWarning ? "Delete saved audio?" : "Regenerate audio?"}
+                </h3>
+                <p id="audio-warning-description">
+                  {showAudioDeleteWarning
+                    ? "Saving with Generate audio off will delete this card's saved audio file."
+                    : "Audio was generated with the old Croatian text. Regenerate it for the edited sentence before saving."}
+                </p>
+              </div>
+            </div>
+            {showAudioRegenerateWarning && (
+              <div className="audio-warning-compare" aria-label="Audio text comparison">
+                <div>
+                  <span>Old text</span>
+                  <p>{card.croatianSentence}</p>
+                </div>
+                <div>
+                  <span>New text</span>
+                  <p>{editDraft.croatianSentence}</p>
+                </div>
+              </div>
+            )}
+            <div className="button-row confirm-actions">
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => setAudioWarningMode(null)}
+                disabled={savingEdit}
+              >
+                <X size={16} aria-hidden="true" />
+                Cancel
+              </button>
+              {showAudioRegenerateWarning && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    void saveEdit("regenerate");
+                  }}
+                  disabled={savingEdit}
+                >
+                  <Volume2 size={16} aria-hidden="true" />
+                  {savingEdit ? "Saving..." : "Regenerate audio"}
+                </button>
+              )}
+              {showAudioDeleteWarning && (
+                <button
+                  type="button"
+                  className="danger"
+                  onClick={() => {
+                    void saveEdit("remove");
+                  }}
+                  disabled={savingEdit}
+                >
+                  <Trash2 size={16} aria-hidden="true" />
+                  Save without audio
+                </button>
+              )}
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   );
 
