@@ -1,4 +1,4 @@
-import { FilePlus2, Upload } from "lucide-react";
+import { FileAudio, FilePlus2, Upload, X } from "lucide-react";
 import { ChangeEvent, FormEvent, useMemo, useState } from "react";
 import { apiJson } from "../../api/client";
 import { READING_LEVELS } from "../../constants";
@@ -16,6 +16,8 @@ export function ImportView({ storyFolders, onImported, setError }: ImportProps) 
   const [level, setLevel] = useState("A2");
   const [folderId, setFolderId] = useState("");
   const [text, setText] = useState("");
+  const [audioFile, setAudioFile] = useState<File | null>(null);
+  const [audioInputKey, setAudioInputKey] = useState(0);
   const [saving, setSaving] = useState(false);
   const preview = useMemo(() => splitPreview(text), [text]);
 
@@ -27,6 +29,31 @@ export function ImportView({ storyFolders, onImported, setError }: ImportProps) 
     reader.readAsText(file);
   }
 
+  function handleAudioFile(event: ChangeEvent<HTMLInputElement>) {
+    setAudioFile(event.target.files?.[0] || null);
+  }
+
+  function clearAudioFile() {
+    setAudioFile(null);
+    setAudioInputKey((current) => current + 1);
+  }
+
+  async function uploadStoryAudio(storyId: string, file: File) {
+    const contentType = file.type.startsWith("audio/") ? file.type : "application/octet-stream";
+    const response = await fetch(`/api/texts/${encodeURIComponent(storyId)}/audio`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": contentType,
+        "X-File-Name": encodeURIComponent(file.name)
+      },
+      body: file
+    });
+    const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+    if (!response.ok) {
+      throw new Error(payload?.error || `Audio upload failed with ${response.status}.`);
+    }
+  }
+
   async function submit(event: FormEvent) {
     event.preventDefault();
     setSaving(true);
@@ -36,9 +63,22 @@ export function ImportView({ storyFolders, onImported, setError }: ImportProps) 
         method: "POST",
         body: JSON.stringify({ title, level, folderId, text })
       });
+      let audioUploadError = "";
+      if (audioFile) {
+        try {
+          await uploadStoryAudio(payload.storyId, audioFile);
+        } catch (caught) {
+          audioUploadError = caught instanceof Error ? caught.message : "Audio upload failed.";
+        }
+      }
       setTitle("");
       setText("");
+      setAudioFile(null);
+      setAudioInputKey((current) => current + 1);
       await onImported(payload.storyId);
+      if (audioUploadError) {
+        setError(`Story saved, but audio upload failed: ${audioUploadError}`);
+      }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Import failed.");
     } finally {
@@ -78,11 +118,34 @@ export function ImportView({ storyFolders, onImported, setError }: ImportProps) 
               </select>
             </label>
           </div>
-          <label className="file-input">
-            <Upload size={16} aria-hidden="true" />
-            Upload .txt
-            <input type="file" accept=".txt,text/plain" onChange={handleFile} />
-          </label>
+          <div className="upload-row">
+            <label className="file-input">
+              <Upload size={16} aria-hidden="true" />
+              Upload .txt
+              <input type="file" accept=".txt,text/plain" onChange={handleFile} />
+            </label>
+            <label className={`file-input ${audioFile ? "selected" : ""}`}>
+              <FileAudio size={16} aria-hidden="true" />
+              {audioFile ? "Change audio" : "Upload audio"}
+              <input
+                key={audioInputKey}
+                type="file"
+                accept="audio/*,.mp3,.m4a,.wav,.ogg,.oga,.webm,.flac,.aac"
+                onChange={handleAudioFile}
+              />
+            </label>
+          </div>
+          {audioFile && (
+            <div className="selected-audio-file">
+              <span>
+                <FileAudio size={16} aria-hidden="true" />
+                {audioFile.name}
+              </span>
+              <button className="icon-button" type="button" onClick={clearAudioFile} aria-label="Remove audio file" title="Remove audio">
+                <X size={16} aria-hidden="true" />
+              </button>
+            </div>
+          )}
           <label>
             Croatian text
             <textarea value={text} onChange={(event) => setText(event.target.value)} rows={14} />

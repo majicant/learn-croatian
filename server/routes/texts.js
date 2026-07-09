@@ -1,4 +1,4 @@
-import { Router } from "express";
+import express, { Router } from "express";
 import { deleteCardsForStories, readCards } from "../repositories/cardsRepository.js";
 import { deleteProgressForStories } from "../repositories/progressRepository.js";
 import {
@@ -20,9 +20,31 @@ import {
   renameStoryFolder
 } from "../repositories/storyFoldersRepository.js";
 import { generateAnalysis } from "../services/analysisService.js";
+import { deleteAudioFile, saveUploadedStoryAudio } from "../services/audioService.js";
 import { buildStory } from "../services/storyService.js";
 
 export const textsRouter = Router();
+
+const audioBodyParser = express.raw({
+  limit: "100mb",
+  type: (request) => {
+    const contentType = String(request.headers["content-type"] || "").toLowerCase();
+    return contentType.startsWith("audio/") || contentType.startsWith("application/octet-stream");
+  }
+});
+
+function decodedUploadFileName(request) {
+  const value = request.get("x-file-name") || "";
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+async function deleteStoryAudioFiles(stories) {
+  await Promise.all(stories.map((story) => deleteAudioFile(story.audioFile)));
+}
 
 textsRouter.get("/", async (_request, response, next) => {
   try {
@@ -68,7 +90,8 @@ textsRouter.delete("/folders/:id", async (request, response, next) => {
     const stories = await listStories();
     const storyIds = stories.filter((story) => story.folderId === request.params.id).map((story) => story.id);
 
-    await deleteStories(storyIds);
+    const deletedStories = await deleteStories(storyIds);
+    await deleteStoryAudioFiles(deletedStories);
     await deleteCardsForStories(storyIds);
     await deleteProgressForStories(storyIds);
     await deleteStoryFolder(request.params.id);
@@ -98,6 +121,27 @@ textsRouter.patch("/:id", async (request, response, next) => {
     });
     if (!story) return response.status(404).json({ error: "Story not found." });
     response.json({ storyId: story.id, title: story.title, level: story.level });
+  } catch (error) {
+    next(error);
+  }
+});
+
+textsRouter.put("/:id/audio", audioBodyParser, async (request, response, next) => {
+  try {
+    const story = await readStory(request.params.id);
+    if (!story) return response.status(404).json({ error: "Story not found." });
+
+    const audioFile = await saveUploadedStoryAudio({
+      storyId: story.id,
+      originalName: decodedUploadFileName(request),
+      mimeType: request.get("content-type") || "",
+      buffer: request.body,
+      previousAudioFile: story.audioFile
+    });
+
+    story.audioFile = audioFile;
+    await writeStory(story);
+    response.json({ storyId: story.id, audioFile });
   } catch (error) {
     next(error);
   }
@@ -140,6 +184,7 @@ textsRouter.delete("/:id", async (request, response, next) => {
     const deletedStories = await deleteStories([request.params.id]);
     if (!deletedStories.length) return response.status(404).json({ error: "Story not found." });
 
+    await deleteStoryAudioFiles(deletedStories);
     await deleteCardsForStories([request.params.id]);
     await deleteProgressForStories([request.params.id]);
     response.status(204).end();

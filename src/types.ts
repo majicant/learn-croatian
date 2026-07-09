@@ -31,6 +31,7 @@ export type Story = {
   title: string;
   level: string;
   folderId: string;
+  audioFile?: string | null;
   paragraphs: Paragraph[];
 };
 
@@ -39,6 +40,7 @@ export type StorySummary = {
   title: string;
   level: string;
   folderId: string;
+  hasAudio?: boolean;
   completed: boolean;
 };
 

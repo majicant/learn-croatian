@@ -1,4 +1,5 @@
 import {
+  AudioLines,
   CheckCircle2,
   ChevronDown,
   ChevronLeft,
@@ -15,6 +16,7 @@ import type { DragEvent, KeyboardEvent, MouseEvent } from "react";
 import { groupStoriesByFolder, groupStoriesByLevel } from "../../domain/stories";
 import type { MinedCard, Paragraph, Sentence, Story, StoryFolder, StorySummary } from "../../types";
 import { AnalysisPanel } from "./AnalysisPanel";
+import { StoryAudioPlayer } from "./StoryAudioPlayer";
 
 type StorySidebarMode = "level" | "folder";
 
@@ -383,7 +385,14 @@ export function ReaderView({
             onClick={() => onSelectStory(item.id)}
             onDoubleClick={() => startRenamingStory(item)}
           >
-            <span className="story-title">{item.title}</span>
+            <span className="story-title-line">
+              <span className="story-title">{item.title}</span>
+              {item.hasAudio && (
+                <span className="story-audio-indicator" aria-label="Has audio" title="Has audio">
+                  <AudioLines size={14} aria-hidden="true" />
+                </span>
+              )}
+            </span>
             <span className="story-meta">
               <span className={item.completed ? "status done" : "status"}>
                 {item.completed ? <CheckCircle2 size={14} aria-hidden="true" /> : <Circle size={14} aria-hidden="true" />}
@@ -579,6 +588,8 @@ export function ReaderView({
                 </p>
               ))}
             </article>
+
+            {story.audioFile && <StoryAudioPlayer audioFile={story.audioFile} title={story.title} setError={setError} />}
           </>
         )}
       </section>

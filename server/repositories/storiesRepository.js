@@ -42,6 +42,7 @@ export async function listStories() {
       title: story.title,
       level: story.level,
       folderId: story.folderId || "",
+      hasAudio: Boolean(story.audioFile),
       completed: Boolean(state.completed)
     };
   });

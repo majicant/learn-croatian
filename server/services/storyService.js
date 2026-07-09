@@ -20,6 +20,7 @@ export function buildStory({ title, level, text, folderId }) {
     title: String(title || "").trim(),
     level: String(level || "").trim() || "A1",
     folderId: String(folderId || "").trim(),
+    audioFile: null,
     paragraphs: paragraphs.map((paragraph, paragraphIndex) => ({
       id: `p${String(paragraphIndex + 1).padStart(3, "0")}`,
       sentences: splitSentences(paragraph).map((sentence) => {
