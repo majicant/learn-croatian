@@ -190,6 +190,33 @@ function App() {
     setStory((current) => (current?.id === storyId ? { ...current, level: payload.level } : current));
   }
 
+  async function updateStorySentence(storyId: string, sentenceId: string, croatian: string) {
+    const payload = await apiJson<{ sentence: Sentence }>(`/api/texts/${storyId}/sentences/${sentenceId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ croatian })
+    });
+    setStory((current) => {
+      if (!current || current.id !== storyId) return current;
+      return {
+        ...current,
+        paragraphs: current.paragraphs.map((paragraph) => ({
+          ...paragraph,
+          sentences: paragraph.sentences.map((item) => (item.id === sentenceId ? payload.sentence : item))
+        }))
+      };
+    });
+  }
+
+  async function deleteStorySentence(storyId: string, sentenceId: string) {
+    const payload = await apiJson<{ story: Story }>(`/api/texts/${storyId}/sentences/${sentenceId}`, {
+      method: "DELETE"
+    });
+    setStory((current) => (current?.id === storyId ? payload.story : current));
+    if (selectedSentenceId === sentenceId) {
+      clearSelectedSentence();
+    }
+  }
+
   async function moveStoryToFolder(storyId: string, folderId: string) {
     await apiJson(`/api/texts/${storyId}/folder`, {
       method: "PATCH",
@@ -207,7 +234,6 @@ function App() {
       setSelectedStoryId(remainingStories[0]?.id || "");
       if (!remainingStories.length) setStory(null);
     }
-    await loadCards();
   }
 
   async function deleteStoryFolder(folderId: string) {
@@ -220,7 +246,6 @@ function App() {
       setSelectedStoryId(remainingStories[0]?.id || "");
       if (!remainingStories.length) setStory(null);
     }
-    await loadCards();
   }
 
   async function selectImportedStory(storyId: string) {
@@ -273,6 +298,8 @@ function App() {
           onRenameFolder={renameStoryFolder}
           onRenameStory={renameStory}
           onChangeStoryLevel={changeStoryLevel}
+          onUpdateSentence={updateStorySentence}
+          onDeleteSentence={deleteStorySentence}
           onMoveStoryToFolder={moveStoryToFolder}
           onDeleteFolder={deleteStoryFolder}
           onDeleteStory={deleteStory}

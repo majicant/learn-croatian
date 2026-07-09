@@ -618,11 +618,19 @@ h4 {
 .row-menu button {
   background: transparent;
   border: 0;
-  color: var(--danger);
+  color: var(--ink);
   justify-content: flex-start;
   min-height: 2rem;
   padding: 0.32rem 0.45rem;
   width: 100%;
+}
+
+.row-menu button:hover {
+  background: #f3f5ed;
+}
+
+.row-menu button.danger-menu-item {
+  color: var(--danger);
 }
 
 .reader-head {
@@ -666,6 +674,43 @@ h4 {
   background: transparent;
   border-color: var(--border);
   color: var(--ink);
+}
+
+.reader-actions {
+  align-items: flex-end;
+  display: grid;
+  gap: 0.28rem;
+  justify-items: end;
+}
+
+.edit-mode-exit-button {
+  align-items: center;
+  background: #f8e4e2;
+  border: 1px solid #d8a2a2;
+  color: var(--danger);
+  display: inline-flex;
+  font-size: 0.74rem;
+  font-weight: 780;
+  gap: 0.28rem;
+  line-height: 1;
+  min-height: 1.75rem;
+  padding: 0.2rem 0.48rem;
+  white-space: nowrap;
+}
+
+.edit-mode-exit-button:hover {
+  background: #eed0cd;
+  border-color: #c47f7f;
+  color: #7f2424;
+}
+
+.edit-mode-exit-button:focus-visible {
+  outline: 2px solid #c47f7f;
+  outline-offset: 2px;
+}
+
+.edit-mode-exit-button svg {
+  flex: 0 0 auto;
 }
 
 .story-text {
@@ -1372,6 +1417,11 @@ h4 {
   color: var(--danger);
 }
 
+.sync-pill.stale {
+  background: #fff2d9;
+  color: var(--warning);
+}
+
 .audio-play {
   align-items: center;
   background: transparent;
@@ -1538,6 +1588,20 @@ h4 {
   gap: 0.9rem;
 }
 
+.sentence-edit-modal {
+  max-width: min(620px, 100%);
+}
+
+.sentence-edit-modal textarea {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.03rem;
+  line-height: 1.55;
+}
+
+.sentence-edit-actions .danger {
+  margin-left: auto;
+}
+
 .checkline {
   color: var(--ink);
   gap: 0.45rem;
@@ -1582,6 +1646,11 @@ h4 {
     align-items: stretch;
     display: grid;
     grid-template-columns: 1fr;
+  }
+
+  .reader-actions {
+    align-items: flex-start;
+    justify-items: start;
   }
 
   .card-row-actions {

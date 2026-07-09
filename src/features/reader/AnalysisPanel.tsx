@@ -470,6 +470,7 @@ export function AnalysisPanel({
               onCardsChanged={refreshStoryAndCards}
               setError={setError}
               onMessage={setCardEditorMessage}
+              allowDelete={false}
             />
           )}
         </>

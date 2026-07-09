@@ -8,6 +8,7 @@ import {
   Folder,
   List,
   MoreHorizontal,
+  PencilLine,
   Plus,
   Trash2
 } from "lucide-react";
@@ -16,6 +17,7 @@ import type { DragEvent, KeyboardEvent, MouseEvent } from "react";
 import { groupStoriesByFolder, groupStoriesByLevel } from "../../domain/stories";
 import type { MinedCard, Paragraph, Sentence, Story, StoryFolder, StorySummary } from "../../types";
 import { AnalysisPanel } from "./AnalysisPanel";
+import { SentenceEditModal } from "./SentenceEditModal";
 import { StoryAudioPlayer } from "./StoryAudioPlayer";
 
 type StorySidebarMode = "level" | "folder";
@@ -29,6 +31,8 @@ type ReaderProps = {
   onRenameFolder: (folderId: string, name: string) => Promise<void>;
   onRenameStory: (storyId: string, title: string) => Promise<void>;
   onChangeStoryLevel: (storyId: string, level: string) => Promise<void>;
+  onUpdateSentence: (storyId: string, sentenceId: string, croatian: string) => Promise<void>;
+  onDeleteSentence: (storyId: string, sentenceId: string) => Promise<void>;
   onMoveStoryToFolder: (storyId: string, folderId: string) => Promise<void>;
   onDeleteFolder: (folderId: string) => Promise<void>;
   onDeleteStory: (storyId: string) => Promise<void>;
@@ -58,6 +62,8 @@ export function ReaderView({
   onRenameFolder,
   onRenameStory,
   onChangeStoryLevel,
+  onUpdateSentence,
+  onDeleteSentence,
   onMoveStoryToFolder,
   onDeleteFolder,
   onDeleteStory,
@@ -93,6 +99,10 @@ export function ReaderView({
   const [folderDropId, setFolderDropId] = useState("");
   const [levelDropId, setLevelDropId] = useState("");
   const [openMenuId, setOpenMenuId] = useState("");
+  const [contentEditStoryId, setContentEditStoryId] = useState("");
+  const [editingSentence, setEditingSentence] = useState<Sentence | null>(null);
+
+  const isEditingStoryContent = Boolean(story && contentEditStoryId === story.id);
 
   useEffect(() => {
     if (!openMenuId) return;
@@ -300,10 +310,66 @@ export function ReaderView({
     setOpenMenuId((current) => (current === id ? "" : id));
   }
 
+  function clearContentEditing() {
+    setContentEditStoryId("");
+    setEditingSentence(null);
+  }
+
+  function selectStoryFromSidebar(storyId: string) {
+    if (storyId !== selectedStoryId) clearContentEditing();
+    onSelectStory(storyId);
+  }
+
+  function startEditingStoryContent(item: StorySummary) {
+    setOpenMenuId("");
+    if (contentEditStoryId === item.id) return;
+    setContentEditStoryId(item.id);
+    setEditingSentence(null);
+    onCloseSentence();
+    if (selectedStoryId !== item.id) {
+      onSelectStory(item.id);
+    }
+  }
+
+  function openSentenceEditor(sentence: Sentence) {
+    setEditingSentence(sentence);
+    onCloseSentence();
+  }
+
+  async function saveEditedSentence(sentence: Sentence, croatian: string) {
+    if (!story) return;
+    setError("");
+    try {
+      await onUpdateSentence(story.id, sentence.id, croatian);
+      setEditingSentence(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Sentence edit could not be saved.");
+    }
+  }
+
+  async function deleteEditedSentence(sentence: Sentence) {
+    if (!story) return;
+    const cardCount = sentence.cardCount || 0;
+    const warning = cardCount
+      ? `Delete this sentence? ${cardCount} saved ${cardCount === 1 ? "card" : "cards"} from it will stay in Cards.`
+      : "Delete this sentence?";
+    if (!window.confirm(warning)) return;
+
+    setError("");
+    try {
+      await onDeleteSentence(story.id, sentence.id);
+      setEditingSentence(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Sentence could not be deleted.");
+    }
+  }
+
   async function deleteFolder(folder: StoryFolder, storyCount: number) {
     if (
       storyCount > 0 &&
-      !window.confirm(`Delete "${folder.name}" and its ${storyCount} ${storyCount === 1 ? "story" : "stories"}?`)
+      !window.confirm(
+        `Delete "${folder.name}" and its ${storyCount} ${storyCount === 1 ? "story" : "stories"}? Saved cards from those stories will stay in Cards.`
+      )
     ) {
       return;
     }
@@ -318,6 +384,10 @@ export function ReaderView({
   }
 
   async function deleteStory(item: StorySummary) {
+    if (!window.confirm(`Delete "${item.title}"? Saved cards from this story will stay in Cards.`)) {
+      return;
+    }
+
     setOpenMenuId("");
     setError("");
     try {
@@ -342,7 +412,11 @@ export function ReaderView({
         </button>
         {openMenuId === menuId && (
           <div className="row-menu" role="menu">
-            <button type="button" onClick={() => void deleteStory(item)} role="menuitem">
+            <button type="button" onClick={() => startEditingStoryContent(item)} role="menuitem">
+              <PencilLine size={14} aria-hidden="true" />
+              Edit
+            </button>
+            <button className="danger-menu-item" type="button" onClick={() => void deleteStory(item)} role="menuitem">
               <Trash2 size={14} aria-hidden="true" />
               Delete
             </button>
@@ -382,7 +456,7 @@ export function ReaderView({
           <button
             className="story-row-main"
             type="button"
-            onClick={() => onSelectStory(item.id)}
+            onClick={() => selectStoryFromSidebar(item.id)}
             onDoubleClick={() => startRenamingStory(item)}
           >
             <span className="story-title-line">
@@ -524,7 +598,12 @@ export function ReaderView({
                         </button>
                         {openMenuId === menuId && (
                           <div className="row-menu" role="menu">
-                            <button type="button" onClick={() => void deleteFolder(folder, folderStories.length)} role="menuitem">
+                            <button
+                              className="danger-menu-item"
+                              type="button"
+                              onClick={() => void deleteFolder(folder, folderStories.length)}
+                              role="menuitem"
+                            >
                               <Trash2 size={14} aria-hidden="true" />
                               Delete
                             </button>
@@ -550,10 +629,18 @@ export function ReaderView({
                 <p className="level-label">{story.level}</p>
                 <h1>{story.title}</h1>
               </div>
-              <label className="complete-toggle">
-                <input type="checkbox" checked={completed} onChange={(event) => void onToggleCompleted(event.target.checked)} />
-                Completed
-              </label>
+              <div className="reader-actions">
+                <label className="complete-toggle">
+                  <input type="checkbox" checked={completed} onChange={(event) => void onToggleCompleted(event.target.checked)} />
+                  Completed
+                </label>
+                {isEditingStoryContent && (
+                  <button className="edit-mode-exit-button" type="button" onClick={clearContentEditing}>
+                    <PencilLine size={13} aria-hidden="true" />
+                    Exit editing
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="page-controls" aria-label="Page controls">
@@ -579,8 +666,14 @@ export function ReaderView({
                         selectedSentence?.id === sentence.id ? "selected" : ""
                       }`}
                       key={sentence.id}
-                      onClick={() => onChooseSentence(sentence)}
-                      title={sentence.hasCards ? `${sentence.cardCount} saved card(s)` : "Analyze sentence"}
+                      onClick={() => (isEditingStoryContent ? openSentenceEditor(sentence) : onChooseSentence(sentence))}
+                      title={
+                        isEditingStoryContent
+                          ? "Edit sentence"
+                          : sentence.hasCards
+                            ? `${sentence.cardCount} saved card(s)`
+                            : "Analyze sentence"
+                      }
                     >
                       {sentence.croatian}{" "}
                     </button>
@@ -593,6 +686,15 @@ export function ReaderView({
           </>
         )}
       </section>
+
+      {story && editingSentence && (
+        <SentenceEditModal
+          sentence={editingSentence}
+          onClose={() => setEditingSentence(null)}
+          onSave={saveEditedSentence}
+          onDelete={deleteEditedSentence}
+        />
+      )}
 
       <AnalysisPanel
         story={story}

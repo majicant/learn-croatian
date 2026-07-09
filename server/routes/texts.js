@@ -1,10 +1,11 @@
 import express, { Router } from "express";
-import { deleteCardsForStories, readCards } from "../repositories/cardsRepository.js";
+import { readCards } from "../repositories/cardsRepository.js";
 import { deleteProgressForStories } from "../repositories/progressRepository.js";
 import {
   attachCardStatus,
   buildUniqueStoryId,
   deleteStories,
+  findSentence,
   findSentenceContext,
   listStories,
   moveStoryToFolder,
@@ -44,6 +45,31 @@ function decodedUploadFileName(request) {
 
 async function deleteStoryAudioFiles(stories) {
   await Promise.all(stories.map((story) => deleteAudioFile(story.audioFile)));
+}
+
+function cleanSentenceText(value) {
+  return String(value || "").trim().replace(/\s+/g, " ");
+}
+
+function removeSentence(story, sentenceId) {
+  let removed = false;
+  const paragraphs = [];
+
+  for (const paragraph of story.paragraphs || []) {
+    const nextSentences = [];
+    for (const sentence of paragraph.sentences || []) {
+      if (sentence.id === sentenceId) {
+        removed = true;
+      } else {
+        nextSentences.push(sentence);
+      }
+    }
+    if (nextSentences.length) paragraphs.push({ ...paragraph, sentences: nextSentences });
+  }
+
+  if (!removed) return false;
+  story.paragraphs = paragraphs;
+  return true;
 }
 
 textsRouter.get("/", async (_request, response, next) => {
@@ -92,7 +118,6 @@ textsRouter.delete("/folders/:id", async (request, response, next) => {
 
     const deletedStories = await deleteStories(storyIds);
     await deleteStoryAudioFiles(deletedStories);
-    await deleteCardsForStories(storyIds);
     await deleteProgressForStories(storyIds);
     await deleteStoryFolder(request.params.id);
 
@@ -185,9 +210,54 @@ textsRouter.delete("/:id", async (request, response, next) => {
     if (!deletedStories.length) return response.status(404).json({ error: "Story not found." });
 
     await deleteStoryAudioFiles(deletedStories);
-    await deleteCardsForStories([request.params.id]);
     await deleteProgressForStories([request.params.id]);
     response.status(204).end();
+  } catch (error) {
+    next(error);
+  }
+});
+
+textsRouter.patch("/:id/sentences/:sentenceId", async (request, response, next) => {
+  try {
+    const story = await readStory(request.params.id);
+    if (!story) return response.status(404).json({ error: "Story not found." });
+
+    const sentence = findSentence(story, request.params.sentenceId);
+    if (!sentence) return response.status(404).json({ error: "Sentence not found." });
+
+    const croatian = cleanSentenceText(request.body?.croatian);
+    if (!croatian) return response.status(400).json({ error: "Sentence text is required." });
+
+    const textChanged = sentence.croatian !== croatian;
+    if (textChanged) {
+      sentence.croatian = croatian;
+      delete sentence.analysis;
+      await writeStory(story);
+    }
+
+    const cardsState = await readCards();
+    const clientStory = attachCardStatus(story, cardsState.cards);
+    response.json({
+      sentence: findSentence(clientStory, request.params.sentenceId)
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+textsRouter.delete("/:id/sentences/:sentenceId", async (request, response, next) => {
+  try {
+    const story = await readStory(request.params.id);
+    if (!story) return response.status(404).json({ error: "Story not found." });
+
+    if (!removeSentence(story, request.params.sentenceId)) {
+      return response.status(404).json({ error: "Sentence not found." });
+    }
+
+    await writeStory(story);
+
+    const cardsState = await readCards();
+    response.json({ story: attachCardStatus(story, cardsState.cards) });
   } catch (error) {
     next(error);
   }

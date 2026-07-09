@@ -12,6 +12,7 @@ type CardEditModalProps = {
   onCardsChanged: () => Promise<void>;
   setError: (message: string) => void;
   onMessage?: (message: string) => void;
+  allowDelete?: boolean;
 };
 
 type CardEditDraft = {
@@ -58,7 +59,7 @@ function cardToEditDraft(card: MinedCard): CardEditDraft {
   };
 }
 
-export function CardEditModal({ card, onClose, onCardsChanged, setError, onMessage }: CardEditModalProps) {
+export function CardEditModal({ card, onClose, onCardsChanged, setError, onMessage, allowDelete = true }: CardEditModalProps) {
   const editTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [editDraft, setEditDraft] = useState<CardEditDraft>(() => cardToEditDraft(card));
   const [pendingEditSelection, setPendingEditSelection] = useState<ClozeSelection | null>(null);
@@ -452,10 +453,12 @@ export function CardEditModal({ card, onClose, onCardsChanged, setError, onMessa
               <X size={16} aria-hidden="true" />
               Cancel
             </button>
-            <button type="button" className="danger" onClick={() => void deleteCard()} disabled={savingEdit}>
-              <Trash2 size={16} aria-hidden="true" />
-              Delete
-            </button>
+            {allowDelete && (
+              <button type="button" className="danger" onClick={() => void deleteCard()} disabled={savingEdit}>
+                <Trash2 size={16} aria-hidden="true" />
+                Delete
+              </button>
+            )}
           </div>
         </form>
       </section>
