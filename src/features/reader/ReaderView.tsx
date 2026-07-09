@@ -39,6 +39,7 @@ type ReaderProps = {
   selectedSentenceCards: MinedCard[];
   analyzingId: string;
   onChooseSentence: (sentence: Sentence) => void;
+  onAnalyzeSentence: (sentence: Sentence, force?: boolean) => Promise<void>;
   onCloseSentence: () => void;
   onToggleCompleted: (completed: boolean) => Promise<void>;
   completed: boolean;
@@ -67,6 +68,7 @@ export function ReaderView({
   selectedSentenceCards,
   analyzingId,
   onChooseSentence,
+  onAnalyzeSentence,
   onCloseSentence,
   onToggleCompleted,
   completed,
@@ -586,6 +588,7 @@ export function ReaderView({
         sentence={selectedSentence}
         cards={selectedSentenceCards}
         isAnalyzing={analyzingId === selectedSentence?.id}
+        onAnalyzeSentence={onAnalyzeSentence}
         onClose={onCloseSentence}
         refreshStoryAndCards={refreshStoryAndCards}
         setError={setError}

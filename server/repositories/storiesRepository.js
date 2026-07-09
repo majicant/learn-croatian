@@ -128,6 +128,24 @@ export function findSentence(story, sentenceId) {
   return null;
 }
 
+export function findSentenceContext(story, sentenceId) {
+  const sentences = [];
+  for (const paragraph of story.paragraphs || []) {
+    for (const sentence of paragraph.sentences || []) {
+      sentences.push(sentence);
+    }
+  }
+
+  const index = sentences.findIndex((sentence) => sentence.id === sentenceId);
+  if (index < 0) return null;
+
+  return {
+    sentence: sentences[index],
+    previousSentence: sentences[index - 1] || null,
+    nextSentence: sentences[index + 1] || null
+  };
+}
+
 export async function buildUniqueStoryId(title) {
   const base = slugify(title);
   let candidate = base;

@@ -5,7 +5,7 @@ import {
   attachCardStatus,
   buildUniqueStoryId,
   deleteStories,
-  findSentence,
+  findSentenceContext,
   listStories,
   moveStoryToFolder,
   readStory,
@@ -153,11 +153,21 @@ textsRouter.post("/:id/sentences/:sentenceId/analyze", async (request, response,
     const story = await readStory(request.params.id);
     if (!story) return response.status(404).json({ error: "Story not found." });
 
-    const sentence = findSentence(story, request.params.sentenceId);
-    if (!sentence) return response.status(404).json({ error: "Sentence not found." });
-    if (sentence.analysis) return response.json({ analysis: sentence.analysis });
+    const context = findSentenceContext(story, request.params.sentenceId);
+    if (!context) return response.status(404).json({ error: "Sentence not found." });
+    const { sentence, previousSentence, nextSentence } = context;
+    const forceAnalysis = request.body?.force === true;
+    if (!forceAnalysis && sentence.analysis) {
+      return response.json({ analysis: sentence.analysis });
+    }
 
-    sentence.analysis = await generateAnalysis({ croatian: sentence.croatian, level: story.level });
+    sentence.analysis = await generateAnalysis({
+      croatian: sentence.croatian,
+      level: story.level,
+      storyTitle: story.title,
+      previousCroatian: previousSentence?.croatian || "",
+      nextCroatian: nextSentence?.croatian || ""
+    });
     await writeStory(story);
     response.json({ analysis: sentence.analysis });
   } catch (error) {

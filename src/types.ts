@@ -2,9 +2,15 @@ export type View = "read" | "import" | "cards" | "settings";
 export type CardType = "basic" | "cloze";
 type SyncStatus = "pending" | "synced" | "error";
 
+export type SuggestedCard = {
+  croatian: string;
+  english: string;
+};
+
 export type Analysis = {
   english: string;
   notes: string[];
+  suggestedCards: SuggestedCard[];
 };
 
 export type Sentence = {

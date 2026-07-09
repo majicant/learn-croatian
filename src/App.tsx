@@ -99,14 +99,19 @@ function App() {
     if (pageIndex > pages.length - 1) setPageIndex(Math.max(0, pages.length - 1));
   }, [pageIndex, pages.length]);
 
-  async function analyzeSentence(sentence: Sentence) {
-    if (!story || sentence.analysis || analyzingId === sentence.id) return;
+  async function analyzeSentence(sentence: Sentence, force = false) {
+    if (!story || (!force && sentence.analysis) || analyzingId === sentence.id) return;
     setAnalyzingId(sentence.id);
     setError("");
     try {
       const payload = await apiJson<{ analysis: Analysis }>(
         `/api/texts/${story.id}/sentences/${sentence.id}/analyze`,
-        { method: "POST" }
+        force
+          ? {
+              method: "POST",
+              body: JSON.stringify({ force: true })
+            }
+          : { method: "POST" }
       );
       setStory((current) => {
         if (!current) return current;
@@ -280,6 +285,7 @@ function App() {
           selectedSentenceCards={selectedSentenceCards}
           analyzingId={analyzingId}
           onChooseSentence={chooseSentence}
+          onAnalyzeSentence={analyzeSentence}
           onCloseSentence={clearSelectedSentence}
           onToggleCompleted={toggleCompleted}
           completed={Boolean(currentSummary?.completed)}
