@@ -32,6 +32,7 @@ export type Story = {
   level: string;
   folderId: string;
   audioFile?: string | null;
+  pageIndex?: number;
   paragraphs: Paragraph[];
 };
 

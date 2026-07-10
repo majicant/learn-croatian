@@ -14,6 +14,15 @@ import { ReaderView } from "./features/reader/ReaderView";
 import { SettingsView } from "./features/settings/SettingsView";
 import type { Analysis, MinedCard, SettingsState, Sentence, Story, StoryFolder, StorySummary, View } from "./types";
 
+function cleanPageIndex(value: unknown) {
+  const pageIndex = Number(value);
+  return Number.isInteger(pageIndex) && pageIndex >= 0 ? pageIndex : 0;
+}
+
+function clampPageIndex(pageIndex: number, pageCount: number) {
+  return Math.min(cleanPageIndex(pageIndex), Math.max(0, pageCount - 1));
+}
+
 function App() {
   const [view, setView] = useState<View>("read");
   const [stories, setStories] = useState<StorySummary[]>([]);
@@ -23,7 +32,7 @@ function App() {
   const [selectedSentenceId, setSelectedSentenceId] = useState<string>("");
   const [cards, setCards] = useState<MinedCard[]>([]);
   const [settings, setSettings] = useState<SettingsState>(DEFAULT_SETTINGS);
-  const [pageIndex, setPageIndex] = useState(0);
+  const [pageIndex, setPageIndexState] = useState(0);
   const [loadingStory, setLoadingStory] = useState(false);
   const [analyzingId, setAnalyzingId] = useState("");
   const [error, setError] = useState("");
@@ -70,9 +79,30 @@ function App() {
     setLoadingStory(true);
     try {
       const payload = await apiJson<{ story: Story }>(`/api/texts/${id}`);
+      const restoredPageIndex = cleanPageIndex(payload.story.pageIndex);
+      const nextPageIndex = clampPageIndex(restoredPageIndex, buildPages(payload.story.paragraphs || []).length);
       setStory(payload.story);
+      setPageIndexState(nextPageIndex);
+      if (restoredPageIndex !== nextPageIndex) {
+        saveStoryPageIndex(id, nextPageIndex).catch((caught) => setError(caught.message));
+      }
     } finally {
       setLoadingStory(false);
+    }
+  }
+
+  async function saveStoryPageIndex(storyId: string, nextPageIndex: number) {
+    await apiJson(`/api/progress/${storyId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ pageIndex: cleanPageIndex(nextPageIndex) })
+    });
+  }
+
+  function setReaderPageIndex(nextPageIndex: number) {
+    const cleanIndex = cleanPageIndex(nextPageIndex);
+    setPageIndexState(cleanIndex);
+    if (selectedStoryId) {
+      saveStoryPageIndex(selectedStoryId, cleanIndex).catch((caught) => setError(caught.message));
     }
   }
 
@@ -87,16 +117,22 @@ function App() {
   useEffect(() => {
     if (!selectedStoryId) {
       setStory(null);
+      setPageIndexState(0);
       return;
     }
-    setPageIndex(0);
     clearSelectedSentence();
     loadStory(selectedStoryId).catch((caught) => setError(caught.message));
   }, [selectedStoryId]);
 
   useEffect(() => {
-    if (pageIndex > pages.length - 1) setPageIndex(Math.max(0, pages.length - 1));
-  }, [pageIndex, pages.length]);
+    if (!story || story.id !== selectedStoryId) return;
+
+    const nextPageIndex = clampPageIndex(pageIndex, pages.length);
+    if (nextPageIndex !== pageIndex) {
+      setPageIndexState(nextPageIndex);
+      saveStoryPageIndex(story.id, nextPageIndex).catch((caught) => setError(caught.message));
+    }
+  }, [pageIndex, pages.length, selectedStoryId, story?.id]);
 
   async function analyzeSentence(sentence: Sentence, force = false) {
     if (!story || (!force && sentence.analysis) || analyzingId === sentence.id) return;
@@ -350,7 +386,7 @@ function App() {
           loadingStory={loadingStory}
           pages={pages}
           pageIndex={pageIndex}
-          setPageIndex={setPageIndex}
+          setPageIndex={setReaderPageIndex}
           selectedSentence={selectedSentence}
           selectedSentenceCards={selectedSentenceCards}
           analyzingId={analyzingId}

@@ -1,6 +1,6 @@
 import express, { Router } from "express";
 import { readCards } from "../repositories/cardsRepository.js";
-import { deleteProgressForStories } from "../repositories/progressRepository.js";
+import { deleteProgressForStories, readProgress } from "../repositories/progressRepository.js";
 import {
   attachCardStatus,
   buildUniqueStoryId,
@@ -148,7 +148,14 @@ textsRouter.get("/:id", async (request, response, next) => {
     const story = await readStory(request.params.id);
     if (!story) return response.status(404).json({ error: "Story not found." });
     const cardsState = await readCards();
-    response.json({ story: attachCardStatus(story, cardsState.cards) });
+    const progress = await readProgress();
+    const storyProgress = progress.stories[story.id] || {};
+    response.json({
+      story: {
+        ...attachCardStatus(story, cardsState.cards),
+        pageIndex: storyProgress.pageIndex || 0
+      }
+    });
   } catch (error) {
     next(error);
   }
