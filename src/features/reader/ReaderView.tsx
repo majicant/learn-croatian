@@ -5,22 +5,29 @@ import {
   ChevronLeft,
   ChevronRight,
   Circle,
+  FileAudio,
   Folder,
   List,
   MoreHorizontal,
   PencilLine,
   Plus,
-  Trash2
+  Save,
+  Trash2,
+  X
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import type { DragEvent, KeyboardEvent, MouseEvent } from "react";
-import { groupStoriesByFolder, groupStoriesByLevel } from "../../domain/stories";
+import type { ChangeEvent, DragEvent, KeyboardEvent, MouseEvent } from "react";
+import { buildPages, groupStoriesByFolder, groupStoriesByLevel, sentenceList } from "../../domain/stories";
 import type { MinedCard, Paragraph, Sentence, Story, StoryFolder, StorySummary } from "../../types";
 import { AnalysisPanel } from "./AnalysisPanel";
 import { SentenceEditModal } from "./SentenceEditModal";
 import { StoryAudioPlayer } from "./StoryAudioPlayer";
 
 type StorySidebarMode = "level" | "folder";
+
+function cleanSentenceText(value: string) {
+  return value.trim().replace(/\s+/g, " ");
+}
 
 type ReaderProps = {
   stories: StorySummary[];
@@ -33,6 +40,8 @@ type ReaderProps = {
   onChangeStoryLevel: (storyId: string, level: string) => Promise<void>;
   onUpdateSentence: (storyId: string, sentenceId: string, croatian: string) => Promise<void>;
   onDeleteSentence: (storyId: string, sentenceId: string) => Promise<void>;
+  onUploadStoryAudio: (storyId: string, file: File) => Promise<void>;
+  onDeleteStoryAudio: (storyId: string) => Promise<void>;
   onMoveStoryToFolder: (storyId: string, folderId: string) => Promise<void>;
   onDeleteFolder: (folderId: string) => Promise<void>;
   onDeleteStory: (storyId: string) => Promise<void>;
@@ -63,6 +72,8 @@ export function ReaderView({
   onChangeStoryLevel,
   onUpdateSentence,
   onDeleteSentence,
+  onUploadStoryAudio,
+  onDeleteStoryAudio,
   onMoveStoryToFolder,
   onDeleteFolder,
   onDeleteStory,
@@ -81,7 +92,6 @@ export function ReaderView({
   refreshStoryAndCards,
   setError
 }: ReaderProps) {
-  const visibleParagraphs = pages[pageIndex] || [];
   const groupedStories = useMemo(() => groupStoriesByLevel(stories), [stories]);
   const folderGroups = useMemo(() => groupStoriesByFolder(stories, storyFolders), [stories, storyFolders]);
   const [sidebarMode, setSidebarMode] = useState<StorySidebarMode>("level");
@@ -99,9 +109,39 @@ export function ReaderView({
   const [openMenuId, setOpenMenuId] = useState("");
   const [contentEditStoryId, setContentEditStoryId] = useState("");
   const [editingSentence, setEditingSentence] = useState<Sentence | null>(null);
+  const [pendingSentenceEdits, setPendingSentenceEdits] = useState<Record<string, string>>({});
+  const [pendingDeletedSentenceIds, setPendingDeletedSentenceIds] = useState<Set<string>>(() => new Set());
+  const [pendingStoryAudioFile, setPendingStoryAudioFile] = useState<File | null>(null);
+  const [pendingStoryAudioRemoved, setPendingStoryAudioRemoved] = useState(false);
+  const [storyAudioInputKey, setStoryAudioInputKey] = useState(0);
+  const [savingContentEdits, setSavingContentEdits] = useState(false);
   const [updatingProgressStoryId, setUpdatingProgressStoryId] = useState("");
 
   const isEditingStoryContent = Boolean(story && contentEditStoryId === story.id);
+  const stagedPages = useMemo(() => {
+    if (!isEditingStoryContent || !story) return pages;
+
+    const paragraphs = story.paragraphs
+      .map((paragraph) => ({
+        ...paragraph,
+        sentences: paragraph.sentences
+          .filter((sentence) => !pendingDeletedSentenceIds.has(sentence.id))
+          .map((sentence) => {
+            const croatian = pendingSentenceEdits[sentence.id];
+            if (!croatian) return sentence;
+            return {
+              ...sentence,
+              croatian,
+              analysis: croatian === sentence.croatian ? sentence.analysis : undefined
+            };
+          })
+      }))
+      .filter((paragraph) => paragraph.sentences.length);
+
+    return buildPages(paragraphs);
+  }, [isEditingStoryContent, pages, pendingDeletedSentenceIds, pendingSentenceEdits, story]);
+  const activePageIndex = Math.min(pageIndex, Math.max(0, stagedPages.length - 1));
+  const visibleParagraphs = stagedPages[activePageIndex] || [];
 
   useEffect(() => {
     if (!openMenuId) return;
@@ -312,6 +352,11 @@ export function ReaderView({
   function clearContentEditing() {
     setContentEditStoryId("");
     setEditingSentence(null);
+    setPendingSentenceEdits({});
+    setPendingDeletedSentenceIds(new Set());
+    setPendingStoryAudioFile(null);
+    setPendingStoryAudioRemoved(false);
+    setStoryAudioInputKey((current) => current + 1);
   }
 
   function selectStoryFromSidebar(storyId: string) {
@@ -324,6 +369,11 @@ export function ReaderView({
     if (contentEditStoryId === item.id) return;
     setContentEditStoryId(item.id);
     setEditingSentence(null);
+    setPendingSentenceEdits({});
+    setPendingDeletedSentenceIds(new Set());
+    setPendingStoryAudioFile(null);
+    setPendingStoryAudioRemoved(false);
+    setStoryAudioInputKey((current) => current + 1);
     onCloseSentence();
     if (selectedStoryId !== item.id) {
       onSelectStory(item.id);
@@ -349,18 +399,26 @@ export function ReaderView({
     }
   }
 
-  async function saveEditedSentence(sentence: Sentence, croatian: string) {
+  function stageEditedSentence(sentence: Sentence, croatian: string) {
     if (!story) return;
-    setError("");
-    try {
-      await onUpdateSentence(story.id, sentence.id, croatian);
-      setEditingSentence(null);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Sentence edit could not be saved.");
-    }
+    const sourceSentence = sentenceList(story).find((item) => item.id === sentence.id);
+    if (!sourceSentence) return;
+
+    const nextCroatian = cleanSentenceText(croatian);
+    const originalCroatian = cleanSentenceText(sourceSentence.croatian);
+    setPendingSentenceEdits((current) => {
+      const next = { ...current };
+      if (nextCroatian === originalCroatian) {
+        delete next[sentence.id];
+      } else {
+        next[sentence.id] = nextCroatian;
+      }
+      return next;
+    });
+    setEditingSentence(null);
   }
 
-  async function deleteEditedSentence(sentence: Sentence) {
+  function deleteEditedSentence(sentence: Sentence) {
     if (!story) return;
     const cardCount = sentence.cardCount || 0;
     const warning = cardCount
@@ -368,12 +426,105 @@ export function ReaderView({
       : "Delete this sentence?";
     if (!window.confirm(warning)) return;
 
+    setPendingSentenceEdits((current) => {
+      const next = { ...current };
+      delete next[sentence.id];
+      return next;
+    });
+    setPendingDeletedSentenceIds((current) => {
+      const next = new Set(current);
+      next.add(sentence.id);
+      return next;
+    });
+    setEditingSentence(null);
+  }
+
+  function stageStoryAudioUpload(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0] || null;
+    if (!file) return;
+    setPendingStoryAudioFile(file);
+    setPendingStoryAudioRemoved(false);
+  }
+
+  function stageStoryAudioRemoval() {
+    setPendingStoryAudioFile(null);
+    setPendingStoryAudioRemoved(Boolean(story?.audioFile));
+    setStoryAudioInputKey((current) => current + 1);
+  }
+
+  function renderStoryAudioEditFooter() {
+    const audioFileName = pendingStoryAudioFile?.name || (pendingStoryAudioRemoved ? "" : story?.audioFile || "");
+
+    return (
+      <section className="story-audio-edit-panel" aria-label="Story audio edit">
+        {audioFileName ? (
+          <div className="story-audio-edit-file">
+            <span className="story-audio-edit-file-name">
+              <FileAudio size={17} aria-hidden="true" />
+              {audioFileName}
+            </span>
+            <button
+              className="story-audio-edit-remove icon-button"
+              type="button"
+              onClick={stageStoryAudioRemoval}
+              disabled={savingContentEdits}
+              aria-label="Remove story audio"
+              title="Remove audio"
+            >
+              <X size={18} aria-hidden="true" />
+            </button>
+          </div>
+        ) : (
+          <label className={`story-audio-upload-button ${savingContentEdits ? "disabled" : ""}`} aria-label="Upload story audio" title="Upload audio">
+            <FileAudio size={20} aria-hidden="true" />
+            <span>Upload audio</span>
+            <input
+              key={storyAudioInputKey}
+              type="file"
+              accept="audio/*,.mp3,.m4a,.wav,.ogg,.oga,.webm,.flac,.aac"
+              onChange={stageStoryAudioUpload}
+              disabled={savingContentEdits}
+            />
+          </label>
+        )}
+      </section>
+    );
+  }
+
+  async function saveContentEditing() {
+    if (!story || savingContentEdits) return;
+
+    const storyId = story.id;
+    const deletedSentenceIds = Array.from(pendingDeletedSentenceIds);
+    const editedSentences = Object.entries(pendingSentenceEdits).filter(
+      ([sentenceId]) => !pendingDeletedSentenceIds.has(sentenceId)
+    );
+    const audioChanged = Boolean(pendingStoryAudioFile || (pendingStoryAudioRemoved && story.audioFile));
+
+    if (!deletedSentenceIds.length && !editedSentences.length && !audioChanged) {
+      clearContentEditing();
+      return;
+    }
+
+    setSavingContentEdits(true);
     setError("");
     try {
-      await onDeleteSentence(story.id, sentence.id);
-      setEditingSentence(null);
+      for (const [sentenceId, croatian] of editedSentences) {
+        await onUpdateSentence(storyId, sentenceId, croatian);
+      }
+      for (const sentenceId of deletedSentenceIds) {
+        await onDeleteSentence(storyId, sentenceId);
+      }
+      if (pendingStoryAudioFile) {
+        await onUploadStoryAudio(storyId, pendingStoryAudioFile);
+      } else if (pendingStoryAudioRemoved && story.audioFile) {
+        await onDeleteStoryAudio(storyId);
+      }
+      clearContentEditing();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Sentence could not be deleted.");
+      setError(caught instanceof Error ? caught.message : "Story edits could not be saved.");
+    } finally {
+      setSavingContentEdits(false);
     }
   }
 
@@ -657,24 +808,41 @@ export function ReaderView({
                   <h1>{story.title}</h1>
                 </div>
                 {isEditingStoryContent && (
-                  <div className="reader-actions">
-                    <button className="edit-mode-exit-button" type="button" onClick={clearContentEditing}>
-                      <PencilLine size={13} aria-hidden="true" />
-                      Exit editing
-                    </button>
+                  <div className="reader-actions" aria-label="Edit mode actions">
+                    <div className="reader-action-buttons">
+                      <button
+                        className="edit-mode-cancel-button secondary"
+                        type="button"
+                        onClick={clearContentEditing}
+                        disabled={savingContentEdits}
+                      >
+                        <X size={16} aria-hidden="true" />
+                        Cancel
+                      </button>
+                      <button
+                        className="edit-mode-save-button"
+                        type="button"
+                        onClick={() => void saveContentEditing()}
+                        disabled={savingContentEdits}
+                      >
+                        <Save size={16} aria-hidden="true" />
+                        {savingContentEdits ? "Saving..." : "Save"}
+                      </button>
+                    </div>
+                    <span className="edit-mode-label">Edit mode</span>
                   </div>
                 )}
               </div>
 
               <div className="page-controls" aria-label="Page controls">
-                <button disabled={pageIndex === 0} onClick={() => setPageIndex(pageIndex - 1)} title="Previous page">
+                <button disabled={activePageIndex === 0} onClick={() => setPageIndex(activePageIndex - 1)} title="Previous page">
                   <ChevronLeft size={16} aria-hidden="true" />
                   Previous
                 </button>
                 <span>
-                  Page {pageIndex + 1} of {pages.length}
+                  Page {activePageIndex + 1} of {stagedPages.length}
                 </span>
-                <button disabled={pageIndex >= pages.length - 1} onClick={() => setPageIndex(pageIndex + 1)} title="Next page">
+                <button disabled={activePageIndex >= stagedPages.length - 1} onClick={() => setPageIndex(activePageIndex + 1)} title="Next page">
                   Next
                   <ChevronRight size={16} aria-hidden="true" />
                 </button>
@@ -706,7 +874,11 @@ export function ReaderView({
               </article>
             </div>
 
-            {story.audioFile && (
+            {isEditingStoryContent ? (
+              <div className="reader-audio-footer">
+                {renderStoryAudioEditFooter()}
+              </div>
+            ) : story.audioFile && (
               <div className="reader-audio-footer">
                 <StoryAudioPlayer audioFile={story.audioFile} title={story.title} setError={setError} />
               </div>
@@ -719,7 +891,7 @@ export function ReaderView({
         <SentenceEditModal
           sentence={editingSentence}
           onClose={() => setEditingSentence(null)}
-          onSave={saveEditedSentence}
+          onSave={stageEditedSentence}
           onDelete={deleteEditedSentence}
         />
       )}

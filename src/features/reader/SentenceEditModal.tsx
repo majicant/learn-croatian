@@ -1,4 +1,4 @@
-import { Save, Trash2, X } from "lucide-react";
+import { Check, Trash2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Sentence } from "../../types";
@@ -6,8 +6,8 @@ import type { Sentence } from "../../types";
 type SentenceEditModalProps = {
   sentence: Sentence;
   onClose: () => void;
-  onSave: (sentence: Sentence, croatian: string) => Promise<void>;
-  onDelete: (sentence: Sentence) => Promise<void>;
+  onSave: (sentence: Sentence, croatian: string) => void;
+  onDelete: (sentence: Sentence) => void;
 };
 
 function cleanSentenceText(value: string) {
@@ -17,11 +17,9 @@ function cleanSentenceText(value: string) {
 export function SentenceEditModal({ sentence, onClose, onSave, onDelete }: SentenceEditModalProps) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [draft, setDraft] = useState(sentence.croatian);
-  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     setDraft(sentence.croatian);
-    setSaving(false);
   }, [sentence]);
 
   useEffect(() => {
@@ -32,7 +30,7 @@ export function SentenceEditModal({ sentence, onClose, onSave, onDelete }: Sente
   useEffect(() => {
     const originalOverflow = document.body.style.overflow;
     function closeOnEscape(event: globalThis.KeyboardEvent) {
-      if (event.key === "Escape" && !saving) onClose();
+      if (event.key === "Escape") onClose();
     }
 
     document.body.style.overflow = "hidden";
@@ -41,40 +39,28 @@ export function SentenceEditModal({ sentence, onClose, onSave, onDelete }: Sente
       document.body.style.overflow = originalOverflow;
       window.removeEventListener("keydown", closeOnEscape);
     };
-  }, [onClose, saving]);
+  }, [onClose]);
 
-  async function saveSentence() {
+  function saveSentence() {
     const croatian = cleanSentenceText(draft);
-    if (!croatian || saving) return;
+    if (!croatian) return;
 
-    setSaving(true);
-    try {
-      await onSave(sentence, croatian);
-    } finally {
-      setSaving(false);
-    }
+    onSave(sentence, croatian);
   }
 
-  async function deleteSentence() {
-    if (saving) return;
-
-    setSaving(true);
-    try {
-      await onDelete(sentence);
-    } finally {
-      setSaving(false);
-    }
+  function deleteSentence() {
+    onDelete(sentence);
   }
 
   const cleanDraft = cleanSentenceText(draft);
   const textChanged = cleanDraft !== sentence.croatian;
-  const canSave = Boolean(cleanDraft && !saving);
+  const canConfirm = Boolean(cleanDraft);
 
   const modal = (
     <div
       className="card-modal-backdrop"
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget && !saving) onClose();
+        if (event.target === event.currentTarget) onClose();
       }}
     >
       <section className="card-modal sentence-edit-modal" role="dialog" aria-modal="true" aria-labelledby="sentence-edit-title">
@@ -95,7 +81,6 @@ export function SentenceEditModal({ sentence, onClose, onSave, onDelete }: Sente
             type="button"
             className="icon-button"
             onClick={onClose}
-            disabled={saving}
             title="Close editor"
             aria-label="Close editor"
           >
@@ -107,7 +92,7 @@ export function SentenceEditModal({ sentence, onClose, onSave, onDelete }: Sente
           className="card-edit-form"
           onSubmit={(event) => {
             event.preventDefault();
-            void saveSentence();
+            saveSentence();
           }}
         >
           <label>
@@ -123,18 +108,20 @@ export function SentenceEditModal({ sentence, onClose, onSave, onDelete }: Sente
           {!cleanDraft && <p className="field-error">Sentence text is required.</p>}
 
           <div className="button-row card-edit-actions sentence-edit-actions">
-            <button type="submit" disabled={!canSave}>
-              <Save size={16} aria-hidden="true" />
-              {saving ? "Saving..." : "Save"}
-            </button>
-            <button type="button" className="secondary" onClick={onClose} disabled={saving}>
-              <X size={16} aria-hidden="true" />
-              Cancel
-            </button>
-            <button type="button" className="danger" onClick={() => void deleteSentence()} disabled={saving}>
+            <button type="button" className="danger" onClick={deleteSentence}>
               <Trash2 size={16} aria-hidden="true" />
               Delete
             </button>
+            <div className="sentence-confirm-actions">
+              <button type="button" className="secondary" onClick={onClose}>
+                <X size={16} aria-hidden="true" />
+                Cancel
+              </button>
+              <button type="submit" disabled={!canConfirm}>
+                <Check size={16} aria-hidden="true" />
+                Okay
+              </button>
+            </div>
           </div>
         </form>
       </section>

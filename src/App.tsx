@@ -205,6 +205,34 @@ function App() {
     });
   }
 
+  async function uploadStoryAudio(storyId: string, file: File) {
+    const contentType = file.type.startsWith("audio/") ? file.type : "application/octet-stream";
+    const response = await fetch(`/api/texts/${encodeURIComponent(storyId)}/audio`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": contentType,
+        "X-File-Name": encodeURIComponent(file.name)
+      },
+      body: file
+    });
+    const payload = (await response.json().catch(() => null)) as { audioFile?: string; error?: string } | null;
+    if (!response.ok || !payload?.audioFile) {
+      throw new Error(payload?.error || `Audio upload failed with ${response.status}.`);
+    }
+
+    setStories((current) => current.map((item) => (item.id === storyId ? { ...item, hasAudio: true } : item)));
+    setStory((current) => (current?.id === storyId ? { ...current, audioFile: payload.audioFile } : current));
+  }
+
+  async function deleteStoryAudio(storyId: string) {
+    await apiJson(`/api/texts/${storyId}/audio`, {
+      method: "DELETE"
+    });
+
+    setStories((current) => current.map((item) => (item.id === storyId ? { ...item, hasAudio: false } : item)));
+    setStory((current) => (current?.id === storyId ? { ...current, audioFile: null } : current));
+  }
+
   async function deleteStorySentence(storyId: string, sentenceId: string) {
     const payload = await apiJson<{ story: Story }>(`/api/texts/${storyId}/sentences/${sentenceId}`, {
       method: "DELETE"
@@ -298,6 +326,8 @@ function App() {
           onChangeStoryLevel={changeStoryLevel}
           onUpdateSentence={updateStorySentence}
           onDeleteSentence={deleteStorySentence}
+          onUploadStoryAudio={uploadStoryAudio}
+          onDeleteStoryAudio={deleteStoryAudio}
           onMoveStoryToFolder={moveStoryToFolder}
           onDeleteFolder={deleteStoryFolder}
           onDeleteStory={deleteStory}

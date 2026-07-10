@@ -172,6 +172,23 @@ textsRouter.put("/:id/audio", audioBodyParser, async (request, response, next) =
   }
 });
 
+textsRouter.delete("/:id/audio", async (request, response, next) => {
+  try {
+    const story = await readStory(request.params.id);
+    if (!story) return response.status(404).json({ error: "Story not found." });
+
+    if (story.audioFile) {
+      await deleteAudioFile(story.audioFile);
+      story.audioFile = null;
+      await writeStory(story);
+    }
+
+    response.json({ storyId: story.id, audioFile: null });
+  } catch (error) {
+    next(error);
+  }
+});
+
 textsRouter.post("/import", async (request, response, next) => {
   try {
     const title = String(request.body.title || "").trim();

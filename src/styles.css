@@ -703,39 +703,73 @@ h4 {
 }
 
 .reader-actions {
-  align-items: flex-end;
+  align-items: end;
   display: grid;
-  gap: 0.28rem;
+  gap: 0.32rem;
   justify-items: end;
 }
 
-.edit-mode-exit-button {
+.reader-action-buttons {
   align-items: center;
-  background: #f8e4e2;
-  border: 1px solid #d8a2a2;
-  color: var(--danger);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
+.edit-mode-save-button,
+.edit-mode-cancel-button {
+  align-items: center;
   display: inline-flex;
-  font-size: 0.74rem;
+  font-size: 0.88rem;
   font-weight: 780;
-  gap: 0.28rem;
+  gap: 0.45rem;
   line-height: 1;
-  min-height: 1.75rem;
-  padding: 0.2rem 0.48rem;
+  min-height: 2.35rem;
+  padding: 0.48rem 0.75rem;
   white-space: nowrap;
 }
 
-.edit-mode-exit-button:hover {
-  background: #eed0cd;
-  border-color: #c47f7f;
-  color: #7f2424;
+.edit-mode-label {
+  color: #9aa396;
+  font-size: 0.72rem;
+  font-weight: 780;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+  transform: translateY(0.35rem);
 }
 
-.edit-mode-exit-button:focus-visible {
-  outline: 2px solid #c47f7f;
+.edit-mode-save-button {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--surface);
+}
+
+.edit-mode-save-button:hover {
+  background: #185a49;
+  border-color: #185a49;
+}
+
+.edit-mode-cancel-button.secondary {
+  background: var(--surface-strong);
+  border-color: var(--border);
+  color: var(--ink);
+}
+
+.edit-mode-cancel-button.secondary:hover {
+  background: #f3f5ed;
+  border-color: #c7d0be;
+}
+
+.edit-mode-save-button:focus-visible,
+.edit-mode-cancel-button:focus-visible {
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
-.edit-mode-exit-button svg {
+.edit-mode-save-button svg,
+.edit-mode-cancel-button svg {
   flex: 0 0 auto;
 }
 
@@ -755,6 +789,74 @@ h4 {
   display: grid;
   gap: 0.72rem;
   max-width: 880px;
+}
+
+.story-audio-edit-panel {
+  display: grid;
+  justify-content: center;
+  min-height: 7.52rem;
+  max-width: 880px;
+  place-items: center;
+}
+
+.story-audio-edit-file {
+  align-items: center;
+  display: flex;
+  gap: 0.75rem;
+  justify-content: center;
+  max-width: 620px;
+  min-height: 2.75rem;
+  width: 100%;
+}
+
+.story-audio-edit-file-name {
+  align-items: center;
+  color: var(--ink);
+  display: flex;
+  font-size: 0.88rem;
+  font-weight: 700;
+  gap: 0.45rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.story-audio-edit-file-name svg {
+  color: var(--accent);
+  flex: 0 0 auto;
+}
+
+.story-audio-edit-remove {
+  flex: 0 0 auto;
+}
+
+.story-audio-upload-button {
+  color: var(--accent);
+  cursor: pointer;
+  display: inline-grid;
+  font-size: 0.82rem;
+  font-weight: 760;
+  gap: 0.28rem;
+  justify-content: center;
+  line-height: 1.1;
+  min-height: 3.4rem;
+  min-width: 5.7rem;
+  padding: 0.28rem 0.45rem;
+  place-items: center;
+}
+
+.story-audio-upload-button:hover {
+  color: #185a49;
+}
+
+.story-audio-upload-button.disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.story-audio-upload-button input {
+  display: none;
 }
 
 .story-audio-head {
@@ -1622,6 +1724,19 @@ h4 {
 }
 
 .sentence-edit-actions .danger {
+  margin-left: 0;
+}
+
+.sentence-edit-actions {
+  justify-content: space-between;
+  width: 100%;
+}
+
+.sentence-confirm-actions {
+  align-items: center;
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
   margin-left: auto;
 }
 
@@ -1679,6 +1794,10 @@ h4 {
   .reader-actions {
     align-items: flex-start;
     justify-items: start;
+  }
+
+  .reader-action-buttons {
+    justify-content: flex-start;
   }
 
   .card-row-actions {
@@ -1763,6 +1882,13 @@ h4 {
 
   .card-edit-actions .danger {
     margin-left: 0;
+  }
+
+  .sentence-edit-actions,
+  .sentence-confirm-actions {
+    display: grid;
+    margin-left: 0;
+    width: 100%;
   }
 
   .reader-scroll-area,
