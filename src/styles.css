@@ -542,6 +542,17 @@ h4 {
   min-height: 2.45rem;
 }
 
+.story-row-select {
+  background: transparent;
+  border: 0;
+  color: var(--ink);
+  justify-content: stretch;
+  justify-items: start;
+  padding: 0;
+  text-align: left;
+  width: 100%;
+}
+
 .story-row-main {
   align-items: flex-start;
   background: transparent;
@@ -555,7 +566,7 @@ h4 {
   width: 100%;
 }
 
-.story-row-main:hover {
+.story-row-select:hover .story-title {
   color: #1f4f44;
 }
 
@@ -602,26 +613,12 @@ h4 {
   white-space: nowrap;
 }
 
-.status-button {
-  background: transparent;
-  border: 0;
-  color: var(--warning);
-  font-size: inherit;
-  justify-content: flex-start;
-  min-height: 1rem;
-  padding: 0;
-}
-
 .status svg {
   flex: 0 0 auto;
 }
 
 .status.done {
   color: var(--accent);
-}
-
-.status-button:hover {
-  color: #1f4f44;
 }
 
 .folder-empty {

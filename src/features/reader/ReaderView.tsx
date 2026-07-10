@@ -12,6 +12,7 @@ import {
   MoreHorizontal,
   PencilLine,
   Plus,
+  RotateCcw,
   Save,
   Trash2,
   X
@@ -155,7 +156,13 @@ export function ReaderView({
 
     return buildPages(paragraphs);
   }, [isEditingStoryContent, pages, pendingDeletedSentenceIds, pendingSentenceEdits, story]);
+  const selectedStorySummary = useMemo(
+    () => stories.find((item) => item.id === selectedStoryId) || null,
+    [stories, selectedStoryId]
+  );
+  const selectedStoryCompleted = Boolean(selectedStorySummary?.completed);
   const activePageIndex = Math.min(pageIndex, Math.max(0, stagedPages.length - 1));
+  const isLastPage = activePageIndex >= stagedPages.length - 1;
   const visibleParagraphs = stagedPages[activePageIndex] || [];
 
   useEffect(() => {
@@ -673,6 +680,17 @@ export function ReaderView({
         </button>
         {openMenuId === menuId && (
           <div className="row-menu" role="menu">
+            {item.completed && (
+              <button
+                type="button"
+                onClick={() => void setStoryCompletion(item.id, false)}
+                disabled={Boolean(updatingProgressStoryId)}
+                role="menuitem"
+              >
+                <RotateCcw size={14} aria-hidden="true" />
+                Reopen
+              </button>
+            )}
             <button type="button" onClick={() => startEditingStoryContent(item)} role="menuitem">
               <PencilLine size={14} aria-hidden="true" />
               Edit
@@ -714,36 +732,27 @@ export function ReaderView({
             />
           </div>
         ) : (
-          <div className="story-row-content">
-            <button
-              className="story-row-main"
-              type="button"
-              onClick={() => selectStoryFromSidebar(item.id)}
-              onDoubleClick={() => startRenamingStory(item)}
-            >
-              <span className="story-title-line">
-                <span className="story-title">{item.title}</span>
-                {item.hasAudio && (
-                  <span className="story-audio-indicator" aria-label="Has audio" title="Has audio">
-                    <AudioLines size={14} aria-hidden="true" />
-                  </span>
-                )}
-              </span>
-            </button>
+          <button
+            className="story-row-content story-row-select"
+            type="button"
+            onClick={() => selectStoryFromSidebar(item.id)}
+            onDoubleClick={() => startRenamingStory(item)}
+          >
+            <span className="story-title-line">
+              <span className="story-title">{item.title}</span>
+              {item.hasAudio && (
+                <span className="story-audio-indicator" aria-label="Has audio" title="Has audio">
+                  <AudioLines size={14} aria-hidden="true" />
+                </span>
+              )}
+            </span>
             <span className="story-meta">
-              <button
-                className={`status status-button ${item.completed ? "done" : ""}`}
-                type="button"
-                onClick={() => void setStoryCompletion(item.id, !item.completed)}
-                disabled={updatingProgressStoryId === item.id}
-                aria-label={item.completed ? `Set ${item.title} to open` : `Mark ${item.title} complete`}
-                title={item.completed ? "Set to open" : "Mark complete"}
-              >
+              <span className={item.completed ? "status done" : "status"}>
                 {item.completed ? <CheckCircle2 size={14} aria-hidden="true" /> : <Circle size={14} aria-hidden="true" />}
                 {item.completed ? "Completed" : "Open"}
-              </button>
+              </span>
             </span>
-          </div>
+          </button>
         )}
         {renderStoryMenu(item)}
       </div>
@@ -991,10 +1000,21 @@ export function ReaderView({
                 <span>
                   Page {activePageIndex + 1} of {stagedPages.length}
                 </span>
-                <button disabled={activePageIndex >= stagedPages.length - 1} onClick={() => setPageIndex(activePageIndex + 1)} title="Next page">
-                  Next
-                  <ChevronRight size={16} aria-hidden="true" />
-                </button>
+                {isLastPage ? (
+                  <button
+                    disabled={!story || selectedStoryCompleted || updatingProgressStoryId === story.id}
+                    onClick={() => story && void setStoryCompletion(story.id, true)}
+                    title={selectedStoryCompleted ? "Story completed" : "Mark completed"}
+                  >
+                    <CheckCircle2 size={16} aria-hidden="true" />
+                    {selectedStoryCompleted ? "Completed" : "Mark Completed"}
+                  </button>
+                ) : (
+                  <button onClick={() => setPageIndex(activePageIndex + 1)} title="Next page">
+                    Next
+                    <ChevronRight size={16} aria-hidden="true" />
+                  </button>
+                )}
               </div>
 
               <article className="story-text">
