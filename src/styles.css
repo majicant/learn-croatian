@@ -220,8 +220,25 @@ h4 {
 
 .reading-panel {
   background: var(--reader);
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.reader-scroll-area {
   overflow: auto;
   padding: 2rem;
+}
+
+.reader-audio-footer {
+  background: var(--reader);
+  border-top: 1px solid var(--border);
+  box-shadow: 0 -14px 28px rgba(38, 43, 34, 0.07);
+  padding: 0.95rem 2rem 1rem;
+  position: sticky;
+  bottom: 0;
+  z-index: 10;
 }
 
 .analysis-panel {
@@ -735,12 +752,9 @@ h4 {
 }
 
 .story-audio-player {
-  border-top: 1px solid var(--border);
   display: grid;
   gap: 0.72rem;
-  margin-top: 2rem;
   max-width: 880px;
-  padding-top: 1rem;
 }
 
 .story-audio-head {
@@ -1649,6 +1663,11 @@ h4 {
     grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
   }
 
+  .reading-panel {
+    height: 100dvh;
+    min-height: 520px;
+  }
+
   .reader-head,
   .cards-toolbar,
   .card-row {
@@ -1678,12 +1697,15 @@ h4 {
 
   .tabs {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    min-width: 0;
+    width: 100%;
   }
 
   .tabs button,
   .page-controls button,
   .button-row button {
+    min-width: 0;
     width: 100%;
   }
 
@@ -1743,7 +1765,8 @@ h4 {
     margin-left: 0;
   }
 
-  .reading-panel,
+  .reader-scroll-area,
+  .reader-audio-footer,
   .import-view,
   .cards-view,
   .settings-view {

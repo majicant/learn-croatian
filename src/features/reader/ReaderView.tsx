@@ -643,64 +643,74 @@ export function ReaderView({
       </aside>
 
       <section className="reading-panel" aria-label="Reader">
-        {loadingStory && <p className="muted">Loading story...</p>}
+        {loadingStory && (
+          <div className="reader-scroll-area">
+            <p className="muted">Loading story...</p>
+          </div>
+        )}
         {!loadingStory && story && (
           <>
-            <div className="reader-head">
-              <div>
-                <p className="level-label">{story.level}</p>
-                <h1>{story.title}</h1>
-              </div>
-              {isEditingStoryContent && (
-                <div className="reader-actions">
-                  <button className="edit-mode-exit-button" type="button" onClick={clearContentEditing}>
-                    <PencilLine size={13} aria-hidden="true" />
-                    Exit editing
-                  </button>
+            <div className="reader-scroll-area">
+              <div className="reader-head">
+                <div>
+                  <p className="level-label">{story.level}</p>
+                  <h1>{story.title}</h1>
                 </div>
-              )}
-            </div>
-
-            <div className="page-controls" aria-label="Page controls">
-              <button disabled={pageIndex === 0} onClick={() => setPageIndex(pageIndex - 1)} title="Previous page">
-                <ChevronLeft size={16} aria-hidden="true" />
-                Previous
-              </button>
-              <span>
-                Page {pageIndex + 1} of {pages.length}
-              </span>
-              <button disabled={pageIndex >= pages.length - 1} onClick={() => setPageIndex(pageIndex + 1)} title="Next page">
-                Next
-                <ChevronRight size={16} aria-hidden="true" />
-              </button>
-            </div>
-
-            <article className="story-text">
-              {visibleParagraphs.map((paragraph) => (
-                <p key={paragraph.id}>
-                  {paragraph.sentences.map((sentence) => (
-                    <button
-                      className={`sentence ${sentence.hasCards ? "has-card" : ""} ${
-                        selectedSentence?.id === sentence.id ? "selected" : ""
-                      }`}
-                      key={sentence.id}
-                      onClick={() => (isEditingStoryContent ? openSentenceEditor(sentence) : onChooseSentence(sentence))}
-                      title={
-                        isEditingStoryContent
-                          ? "Edit sentence"
-                          : sentence.hasCards
-                            ? `${sentence.cardCount} saved card(s)`
-                            : "Analyze sentence"
-                      }
-                    >
-                      {sentence.croatian}{" "}
+                {isEditingStoryContent && (
+                  <div className="reader-actions">
+                    <button className="edit-mode-exit-button" type="button" onClick={clearContentEditing}>
+                      <PencilLine size={13} aria-hidden="true" />
+                      Exit editing
                     </button>
-                  ))}
-                </p>
-              ))}
-            </article>
+                  </div>
+                )}
+              </div>
 
-            {story.audioFile && <StoryAudioPlayer audioFile={story.audioFile} title={story.title} setError={setError} />}
+              <div className="page-controls" aria-label="Page controls">
+                <button disabled={pageIndex === 0} onClick={() => setPageIndex(pageIndex - 1)} title="Previous page">
+                  <ChevronLeft size={16} aria-hidden="true" />
+                  Previous
+                </button>
+                <span>
+                  Page {pageIndex + 1} of {pages.length}
+                </span>
+                <button disabled={pageIndex >= pages.length - 1} onClick={() => setPageIndex(pageIndex + 1)} title="Next page">
+                  Next
+                  <ChevronRight size={16} aria-hidden="true" />
+                </button>
+              </div>
+
+              <article className="story-text">
+                {visibleParagraphs.map((paragraph) => (
+                  <p key={paragraph.id}>
+                    {paragraph.sentences.map((sentence) => (
+                      <button
+                        className={`sentence ${sentence.hasCards ? "has-card" : ""} ${
+                          selectedSentence?.id === sentence.id ? "selected" : ""
+                        }`}
+                        key={sentence.id}
+                        onClick={() => (isEditingStoryContent ? openSentenceEditor(sentence) : onChooseSentence(sentence))}
+                        title={
+                          isEditingStoryContent
+                            ? "Edit sentence"
+                            : sentence.hasCards
+                              ? `${sentence.cardCount} saved card(s)`
+                              : "Analyze sentence"
+                        }
+                      >
+                        {sentence.croatian}{" "}
+                      </button>
+                    ))}
+                  </p>
+                ))}
+              </article>
+            </div>
+
+            {story.audioFile && (
+              <div className="reader-audio-footer">
+                <StoryAudioPlayer audioFile={story.audioFile} title={story.title} setError={setError} />
+              </div>
+            )}
           </>
         )}
       </section>

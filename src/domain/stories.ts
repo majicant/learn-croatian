@@ -20,30 +20,113 @@ export function sentenceList(story: Story | null): Sentence[] {
   return story?.paragraphs.flatMap((paragraph) => paragraph.sentences) || [];
 }
 
-export function buildPages(paragraphs: Paragraph[]): Paragraph[][] {
-  const pages: Paragraph[][] = [];
-  let current: Paragraph[] = [];
-  let sentenceCount = 0;
-  let characterCount = 0;
+const PAGE_TARGET_SENTENCES = 18;
+const PAGE_MAX_SENTENCES = 22;
+const PAGE_TARGET_CHARACTERS = 2200;
+const PAGE_MAX_CHARACTERS = 2600;
+const PAGE_TARGET_LINES = 30;
+const PAGE_MAX_LINES = 36;
+const PAGE_MIN_LINES = 16;
+const PAGE_MIN_CHARACTERS = 1200;
+const ESTIMATED_CHARACTERS_PER_LINE = 76;
+const PARAGRAPH_BREAK_LINES = 0.5;
 
-  for (const paragraph of paragraphs) {
-    const paragraphSentences = paragraph.sentences.length;
-    const paragraphCharacters = paragraph.sentences.reduce((total, sentence) => total + sentence.croatian.length, 0);
-    const wouldOverflow = current.length > 0 && (sentenceCount + paragraphSentences > 14 || characterCount + paragraphCharacters > 2200);
+type PageDraft = {
+  paragraphs: Paragraph[];
+  sentenceCount: number;
+  characterCount: number;
+  lineCount: number;
+  openParagraphId: string;
+};
 
-    if (wouldOverflow) {
-      pages.push(current);
-      current = [];
-      sentenceCount = 0;
-      characterCount = 0;
-    }
+type PageCost = {
+  characters: number;
+  lines: number;
+};
 
-    current.push(paragraph);
-    sentenceCount += paragraphSentences;
-    characterCount += paragraphCharacters;
+function emptyPageDraft(): PageDraft {
+  return {
+    paragraphs: [],
+    sentenceCount: 0,
+    characterCount: 0,
+    lineCount: 0,
+    openParagraphId: ""
+  };
+}
+
+function sentenceCharacters(sentence: Sentence) {
+  return sentence.croatian.trim().length;
+}
+
+function sentenceLineCount(sentence: Sentence) {
+  return Math.max(1, Math.ceil(sentenceCharacters(sentence) / ESTIMATED_CHARACTERS_PER_LINE));
+}
+
+function pageCost(page: PageDraft, paragraph: Paragraph, sentence: Sentence): PageCost {
+  const startsNewParagraph = page.sentenceCount > 0 && page.openParagraphId !== paragraph.id;
+  return {
+    characters: sentenceCharacters(sentence),
+    lines: sentenceLineCount(sentence) + (startsNewParagraph ? PARAGRAPH_BREAK_LINES : 0)
+  };
+}
+
+function shouldStartNewPage(page: PageDraft, cost: PageCost) {
+  if (page.sentenceCount === 0) return false;
+
+  const nextSentenceCount = page.sentenceCount + 1;
+  const nextCharacterCount = page.characterCount + cost.characters;
+  const nextLineCount = page.lineCount + cost.lines;
+  const pageHasUsefulSize =
+    page.lineCount >= PAGE_MIN_LINES ||
+    page.characterCount >= PAGE_MIN_CHARACTERS ||
+    page.sentenceCount >= PAGE_TARGET_SENTENCES;
+
+  return (
+    nextSentenceCount > PAGE_MAX_SENTENCES ||
+    nextCharacterCount > PAGE_MAX_CHARACTERS ||
+    nextLineCount > PAGE_MAX_LINES ||
+    (pageHasUsefulSize &&
+      (nextSentenceCount > PAGE_TARGET_SENTENCES ||
+        nextCharacterCount > PAGE_TARGET_CHARACTERS ||
+        nextLineCount > PAGE_TARGET_LINES))
+  );
+}
+
+function appendSentence(page: PageDraft, paragraph: Paragraph, sentence: Sentence, cost: PageCost) {
+  let currentParagraph = page.paragraphs[page.paragraphs.length - 1];
+  if (!currentParagraph || page.openParagraphId !== paragraph.id) {
+    currentParagraph = {
+      id: `${paragraph.id}:${sentence.id}`,
+      sentences: []
+    };
+    page.paragraphs.push(currentParagraph);
+    page.openParagraphId = paragraph.id;
   }
 
-  if (current.length) pages.push(current);
+  currentParagraph.sentences.push(sentence);
+  page.sentenceCount += 1;
+  page.characterCount += cost.characters;
+  page.lineCount += cost.lines;
+}
+
+export function buildPages(paragraphs: Paragraph[]): Paragraph[][] {
+  const pages: Paragraph[][] = [];
+  let current = emptyPageDraft();
+
+  for (const paragraph of paragraphs) {
+    for (const sentence of paragraph.sentences) {
+      let cost = pageCost(current, paragraph, sentence);
+      if (shouldStartNewPage(current, cost)) {
+        pages.push(current.paragraphs);
+        current = emptyPageDraft();
+        cost = pageCost(current, paragraph, sentence);
+      }
+
+      appendSentence(current, paragraph, sentence, cost);
+    }
+  }
+
+  if (current.sentenceCount) pages.push(current.paragraphs);
   return pages.length ? pages : [[]];
 }
 
