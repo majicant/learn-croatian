@@ -154,26 +154,98 @@ export function groupStoriesByLevel(stories: StorySummary[]) {
   });
 }
 
-export function groupStoriesByFolder(stories: StorySummary[], folders: StoryFolder[]) {
+export type FolderTreeNode = {
+  folder: StoryFolder;
+  stories: StorySummary[];
+  children: FolderTreeNode[];
+  depth: number;
+  storyCount: number;
+  pathLabel: string;
+};
+
+function cleanFolderId(value: string) {
+  return value.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "").replace(/\/+/g, "/");
+}
+
+function parentFolderId(folderId: string) {
+  const cleanId = cleanFolderId(folderId);
+  if (!cleanId.includes("/")) return "";
+  return cleanId.slice(0, cleanId.lastIndexOf("/"));
+}
+
+export function isSameOrDescendantFolder(folderId: string, ancestorId: string) {
+  const cleanId = cleanFolderId(folderId);
+  const cleanAncestorId = cleanFolderId(ancestorId);
+  return Boolean(cleanAncestorId && (cleanId === cleanAncestorId || cleanId.startsWith(`${cleanAncestorId}/`)));
+}
+
+function normalizeFolders(folders: StoryFolder[]) {
+  return folders.map((folder) => {
+    const id = cleanFolderId(folder.id);
+    return {
+      ...folder,
+      id,
+      parentId: cleanFolderId(folder.parentId || parentFolderId(id))
+    };
+  });
+}
+
+export function buildFolderTree(stories: StorySummary[], folders: StoryFolder[]) {
+  const normalizedFolders = normalizeFolders(folders);
+  const folderById = new Map(normalizedFolders.map((folder) => [folder.id, folder]));
   const storiesByFolder = new Map<string, StorySummary[]>();
+
   for (const story of stories) {
-    const folderId = story.folderId;
-    storiesByFolder.set(folderId, [...(storiesByFolder.get(folderId) || []), story]);
+    const folderId = cleanFolderId(story.folderId);
+    const visibleFolderId = folderId && folderById.has(folderId) ? folderId : "";
+    storiesByFolder.set(visibleFolderId, [...(storiesByFolder.get(visibleFolderId) || []), story]);
   }
 
   const sortStories = (items: StorySummary[]) =>
     [...items].sort((a, b) => a.title.localeCompare(b.title, "hr"));
+  const sortFolders = (items: StoryFolder[]) =>
+    [...items].sort((a, b) => a.name.localeCompare(b.name, "hr") || a.id.localeCompare(b.id, "hr"));
 
-  const unfiledStories = sortStories(storiesByFolder.get("") || []);
-  const groups: Array<[StoryFolder, StorySummary[]]> = [];
-
-  groups.push([{ id: "", name: "Unfiled" }, unfiledStories]);
-
-  for (const folder of folders) {
-    groups.push([folder, sortStories(storiesByFolder.get(folder.id) || [])]);
+  const childrenByParent = new Map<string, StoryFolder[]>();
+  for (const folder of normalizedFolders) {
+    const parentId = folder.parentId && folderById.has(folder.parentId) ? folder.parentId : "";
+    childrenByParent.set(parentId, [...(childrenByParent.get(parentId) || []), folder]);
   }
 
-  return groups;
+  function makeNode(folder: StoryFolder, depth: number, ancestorNames: string[]): FolderTreeNode {
+    const pathNames = [...ancestorNames, folder.name];
+    const children = sortFolders(childrenByParent.get(folder.id) || []).map((child) =>
+      makeNode(child, depth + 1, pathNames)
+    );
+    const directStories = sortStories(storiesByFolder.get(folder.id) || []);
+
+    return {
+      folder,
+      stories: directStories,
+      children,
+      depth,
+      storyCount: directStories.length + children.reduce((total, child) => total + child.storyCount, 0),
+      pathLabel: pathNames.join(" / ")
+    };
+  }
+
+  return {
+    unfiledStories: sortStories(storiesByFolder.get("") || []),
+    nodes: sortFolders(childrenByParent.get("") || []).map((folder) => makeNode(folder, 0, []))
+  };
+}
+
+export function folderPickerOptions(folders: StoryFolder[]) {
+  const tree = buildFolderTree([], folders);
+  const options: Array<{ folder: StoryFolder; label: string }> = [];
+
+  function appendNode(node: FolderTreeNode) {
+    options.push({ folder: node.folder, label: node.pathLabel });
+    for (const child of node.children) appendNode(child);
+  }
+
+  for (const node of tree.nodes) appendNode(node);
+  return options;
 }
 
 export function targetParts(sentence: string, target: string, targetStart?: number, targetEnd?: number) {

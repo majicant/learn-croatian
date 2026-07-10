@@ -2,7 +2,7 @@ import { FileAudio, FilePlus2, Upload, X } from "lucide-react";
 import { ChangeEvent, FormEvent, useMemo, useState } from "react";
 import { apiJson } from "../../api/client";
 import { READING_LEVELS } from "../../constants";
-import { splitPreview } from "../../domain/stories";
+import { folderPickerOptions, splitPreview } from "../../domain/stories";
 import type { StoryFolder } from "../../types";
 
 type ImportProps = {
@@ -20,6 +20,7 @@ export function ImportView({ storyFolders, onImported, setError }: ImportProps) 
   const [audioInputKey, setAudioInputKey] = useState(0);
   const [saving, setSaving] = useState(false);
   const preview = useMemo(() => splitPreview(text), [text]);
+  const folderOptions = useMemo(() => folderPickerOptions(storyFolders), [storyFolders]);
 
   function handleFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -110,9 +111,9 @@ export function ImportView({ storyFolders, onImported, setError }: ImportProps) 
               Folder
               <select value={folderId} onChange={(event) => setFolderId(event.target.value)}>
                 <option value="">Unfiled</option>
-                {storyFolders.map((folder) => (
+                {folderOptions.map(({ folder, label }) => (
                   <option key={folder.id} value={folder.id}>
-                    {folder.name}
+                    {label}
                   </option>
                 ))}
               </select>

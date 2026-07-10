@@ -7,7 +7,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { apiJson } from "./api/client";
 import { DEFAULT_SETTINGS } from "./constants";
-import { buildPages, sentenceList } from "./domain/stories";
+import { buildPages, isSameOrDescendantFolder, sentenceList } from "./domain/stories";
 import { CardsView } from "./features/cards/CardsView";
 import { ImportView } from "./features/import/ImportView";
 import { ReaderView } from "./features/reader/ReaderView";
@@ -153,21 +153,29 @@ function App() {
     setStories((current) => current.map((item) => (item.id === storyId ? { ...item, completed } : item)));
   }
 
-  async function createStoryFolder() {
+  async function createStoryFolder(parentId = "") {
     const payload = await apiJson<{ folder: StoryFolder }>("/api/texts/folders", {
       method: "POST",
-      body: JSON.stringify({})
+      body: JSON.stringify({ parentId })
     });
     setStoryFolders((current) => [...current, payload.folder]);
     return payload.folder;
   }
 
   async function renameStoryFolder(folderId: string, name: string) {
-    const payload = await apiJson<{ folder: StoryFolder }>(`/api/texts/folders/${folderId}`, {
+    await apiJson<{ folder: StoryFolder }>(`/api/texts/folders/${encodeURIComponent(folderId)}`, {
       method: "PATCH",
       body: JSON.stringify({ name })
     });
-    setStoryFolders((current) => current.map((item) => (item.id === folderId ? payload.folder : item)));
+    await Promise.all([loadStoryFolders(), loadStories(), selectedStoryId ? loadStory(selectedStoryId) : Promise.resolve()]);
+  }
+
+  async function moveStoryFolder(folderId: string, parentId: string) {
+    await apiJson<{ folder: StoryFolder }>(`/api/texts/folders/${encodeURIComponent(folderId)}/parent`, {
+      method: "PATCH",
+      body: JSON.stringify({ parentId })
+    });
+    await Promise.all([loadStoryFolders(), loadStories(), selectedStoryId ? loadStory(selectedStoryId) : Promise.resolve()]);
   }
 
   async function renameStory(storyId: string, title: string) {
@@ -263,10 +271,16 @@ function App() {
   }
 
   async function deleteStoryFolder(folderId: string) {
-    await apiJson(`/api/texts/folders/${folderId}`, { method: "DELETE" });
-    const deletedStoryIds = new Set(stories.filter((item) => item.folderId === folderId).map((item) => item.id));
+    await apiJson(`/api/texts/folders/${encodeURIComponent(folderId)}`, { method: "DELETE" });
+    const deletedStoryIds = new Set(
+      stories
+        .filter((item) => item.folderId === folderId || isSameOrDescendantFolder(item.folderId, folderId))
+        .map((item) => item.id)
+    );
     const remainingStories = stories.filter((item) => !deletedStoryIds.has(item.id));
-    setStoryFolders((current) => current.filter((item) => item.id !== folderId));
+    setStoryFolders((current) =>
+      current.filter((item) => item.id !== folderId && !isSameOrDescendantFolder(item.id, folderId))
+    );
     setStories(remainingStories);
     if (deletedStoryIds.has(selectedStoryId)) {
       setSelectedStoryId(remainingStories[0]?.id || "");
@@ -329,6 +343,7 @@ function App() {
           onUploadStoryAudio={uploadStoryAudio}
           onDeleteStoryAudio={deleteStoryAudio}
           onMoveStoryToFolder={moveStoryToFolder}
+          onMoveFolder={moveStoryFolder}
           onDeleteFolder={deleteStoryFolder}
           onDeleteStory={deleteStory}
           story={story}

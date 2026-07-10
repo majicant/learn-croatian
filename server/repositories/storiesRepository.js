@@ -2,6 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { textsDir } from "../config.js";
 import { readJson, writeJsonSafe } from "../storage/jsonStore.js";
+import { assertFolderId, cleanFolderId, replaceFolderPrefix } from "../utils/folders.js";
 import { slugify } from "../utils/text.js";
 import { readProgress } from "./progressRepository.js";
 
@@ -13,26 +14,73 @@ export function assertStoryId(id) {
   }
 }
 
-function storyPath(id) {
+function storyFolderPath(folderId) {
+  const cleanId = cleanFolderId(folderId);
+  assertFolderId(cleanId);
+  return cleanId ? path.join(textsDir, cleanId, "") : textsDir;
+}
+
+function storyFilePath(story) {
+  assertStoryId(story.id);
+  return path.join(storyFolderPath(story.folderId || ""), `${story.id}.json`);
+}
+
+async function readStoryRecordsFromDirectory(directory) {
+  let entries = [];
+  try {
+    entries = await fs.readdir(directory, { withFileTypes: true });
+  } catch (error) {
+    if (error.code === "ENOENT") return [];
+    throw error;
+  }
+
+  const records = [];
+  for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name, "hr"))) {
+    const entryPath = path.join(directory, entry.name);
+    if (entry.isDirectory()) {
+      records.push(...(await readStoryRecordsFromDirectory(entryPath)));
+    } else if (entry.isFile() && entry.name.endsWith(".json")) {
+      const story = await readJson(entryPath, null);
+      if (story) records.push({ story, filePath: entryPath });
+    }
+  }
+
+  return records;
+}
+
+async function readAllStoryRecords() {
+  return readStoryRecordsFromDirectory(textsDir);
+}
+
+async function findStoryRecord(id) {
   assertStoryId(id);
-  return path.join(textsDir, `${id}.json`);
+  const records = await readAllStoryRecords();
+  return records.find((record) => record.story?.id === id) || null;
+}
+
+async function writeStoryRecord(story, previousPath = "") {
+  const nextPath = storyFilePath(story);
+  await writeJsonSafe(nextPath, story);
+  if (previousPath && path.resolve(previousPath) !== path.resolve(nextPath)) {
+    await fs.rm(previousPath, { force: true });
+  }
 }
 
 export async function readStory(id) {
-  return readJson(storyPath(id), null);
+  return (await findStoryRecord(id))?.story || null;
 }
 
 export async function writeStory(story) {
-  await writeJsonSafe(storyPath(story.id), story);
+  const existing = story.id ? await findStoryRecord(story.id) : null;
+  await writeStoryRecord(story, existing?.filePath || "");
 }
 
 async function readAllStories() {
-  const files = (await fs.readdir(textsDir)).filter((file) => file.endsWith(".json"));
-  const stories = await Promise.all(files.map((file) => readJson(path.join(textsDir, file), null)));
-  return stories.filter(Boolean);
+  return (await readAllStoryRecords()).map((record) => record.story).filter(Boolean);
 }
 
 export async function listStories() {
+  await ensureStoryFilesMatchFolders();
   const progress = await readProgress();
   const stories = await readAllStories();
   const summaries = stories.map((story) => {
@@ -103,21 +151,48 @@ export async function updateStoryMetadata(id, values) {
 }
 
 export async function moveStoryToFolder(id, folderId) {
-  const story = await readStory(id);
-  if (!story) return null;
+  const record = await findStoryRecord(id);
+  if (!record) return null;
 
+  const story = record.story;
   story.folderId = folderId || "";
-  await writeStory(story);
+  await writeStoryRecord(story, record.filePath);
   return story;
+}
+
+export async function updateStoryFolderIds(oldFolderId, newFolderId) {
+  const cleanOldFolderId = cleanFolderId(oldFolderId);
+  const cleanNewFolderId = cleanFolderId(newFolderId);
+  assertFolderId(cleanOldFolderId);
+  assertFolderId(cleanNewFolderId);
+  if (cleanOldFolderId === cleanNewFolderId) return [];
+
+  const updatedStories = [];
+  const records = await readAllStoryRecords();
+  for (const record of records) {
+    const currentFolderId = cleanFolderId(record.story.folderId);
+    const nextFolderId = replaceFolderPrefix(currentFolderId, cleanOldFolderId, cleanNewFolderId);
+    if (nextFolderId === currentFolderId) continue;
+
+    const story = {
+      ...record.story,
+      folderId: nextFolderId
+    };
+    await writeStoryRecord(story, record.filePath);
+    updatedStories.push(story);
+  }
+
+  return updatedStories;
 }
 
 export async function deleteStories(ids) {
   const storyIdSet = new Set(ids);
-  const stories = await readAllStories();
-  const deletedStories = stories.filter((story) => storyIdSet.has(story.id));
+  const records = await readAllStoryRecords();
+  const deletedRecords = records.filter((record) => storyIdSet.has(record.story.id));
+  const deletedStories = deletedRecords.map((record) => record.story);
   if (!deletedStories.length) return [];
 
-  await Promise.all(deletedStories.map((story) => fs.rm(storyPath(story.id), { force: true })));
+  await Promise.all(deletedRecords.map((record) => fs.rm(record.filePath, { force: true })));
   return deletedStories;
 }
 
@@ -153,12 +228,21 @@ export async function buildUniqueStoryId(title) {
   let index = 1;
 
   while (true) {
-    try {
-      await fs.access(storyPath(candidate));
-      candidate = `${base}-${index}`;
-      index += 1;
-    } catch {
+    if (!(await findStoryRecord(candidate))) {
       return candidate;
     }
+    candidate = `${base}-${index}`;
+    index += 1;
   }
+}
+
+async function ensureStoryFilesMatchFolders() {
+  const records = await readAllStoryRecords();
+  await Promise.all(
+    records.map(async (record) => {
+      const expectedPath = storyFilePath(record.story);
+      if (path.resolve(record.filePath) === path.resolve(expectedPath)) return;
+      await writeStoryRecord(record.story, record.filePath);
+    })
+  );
 }

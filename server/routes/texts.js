@@ -11,6 +11,7 @@ import {
   moveStoryToFolder,
   readStory,
   updateStoryMetadata,
+  updateStoryFolderIds,
   writeStory
 } from "../repositories/storiesRepository.js";
 import {
@@ -18,11 +19,13 @@ import {
   createStoryFolder,
   deleteStoryFolder,
   listStoryFolders,
+  moveStoryFolder,
   renameStoryFolder
 } from "../repositories/storyFoldersRepository.js";
 import { generateAnalysis } from "../services/analysisService.js";
 import { deleteAudioFile, saveUploadedStoryAudio } from "../services/audioService.js";
 import { buildStory } from "../services/storyService.js";
+import { isSameOrDescendantFolder } from "../utils/folders.js";
 
 export const textsRouter = Router();
 
@@ -90,7 +93,7 @@ textsRouter.get("/folders", async (_request, response, next) => {
 
 textsRouter.post("/folders", async (request, response, next) => {
   try {
-    const folder = await createStoryFolder(request.body.name);
+    const folder = await createStoryFolder(request.body.name, request.body.parentId);
     response.status(201).json({ folder });
   } catch (error) {
     next(error);
@@ -99,8 +102,19 @@ textsRouter.post("/folders", async (request, response, next) => {
 
 textsRouter.patch("/folders/:id", async (request, response, next) => {
   try {
-    const folder = await renameStoryFolder(request.params.id, request.body.name);
-    response.json({ folder });
+    const result = await renameStoryFolder(request.params.id, request.body.name);
+    await updateStoryFolderIds(result.oldFolderId, result.newFolderId);
+    response.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+textsRouter.patch("/folders/:id/parent", async (request, response, next) => {
+  try {
+    const result = await moveStoryFolder(request.params.id, request.body.parentId);
+    await updateStoryFolderIds(result.oldFolderId, result.newFolderId);
+    response.json(result);
   } catch (error) {
     next(error);
   }
@@ -114,7 +128,9 @@ textsRouter.delete("/folders/:id", async (request, response, next) => {
     }
 
     const stories = await listStories();
-    const storyIds = stories.filter((story) => story.folderId === request.params.id).map((story) => story.id);
+    const storyIds = stories
+      .filter((story) => story.folderId === request.params.id || isSameOrDescendantFolder(story.folderId, request.params.id))
+      .map((story) => story.id);
 
     const deletedStories = await deleteStories(storyIds);
     await deleteStoryAudioFiles(deletedStories);

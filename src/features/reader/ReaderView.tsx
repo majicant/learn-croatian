@@ -7,6 +7,7 @@ import {
   Circle,
   FileAudio,
   Folder,
+  FolderPlus,
   List,
   MoreHorizontal,
   PencilLine,
@@ -16,8 +17,15 @@ import {
   X
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import type { ChangeEvent, DragEvent, KeyboardEvent, MouseEvent } from "react";
-import { buildPages, groupStoriesByFolder, groupStoriesByLevel, sentenceList } from "../../domain/stories";
+import type { CSSProperties, ChangeEvent, DragEvent, KeyboardEvent, MouseEvent } from "react";
+import {
+  buildFolderTree,
+  buildPages,
+  groupStoriesByLevel,
+  isSameOrDescendantFolder,
+  sentenceList
+} from "../../domain/stories";
+import type { FolderTreeNode } from "../../domain/stories";
 import type { MinedCard, Paragraph, Sentence, Story, StoryFolder, StorySummary } from "../../types";
 import { AnalysisPanel } from "./AnalysisPanel";
 import { SentenceEditModal } from "./SentenceEditModal";
@@ -29,12 +37,15 @@ function cleanSentenceText(value: string) {
   return value.trim().replace(/\s+/g, " ");
 }
 
+const STORY_DRAG_TYPE = "application/x-learn-croatian-story";
+const FOLDER_DRAG_TYPE = "application/x-learn-croatian-folder";
+
 type ReaderProps = {
   stories: StorySummary[];
   storyFolders: StoryFolder[];
   selectedStoryId: string;
   onSelectStory: (id: string) => void;
-  onCreateFolder: () => Promise<StoryFolder>;
+  onCreateFolder: (parentId?: string) => Promise<StoryFolder>;
   onRenameFolder: (folderId: string, name: string) => Promise<void>;
   onRenameStory: (storyId: string, title: string) => Promise<void>;
   onChangeStoryLevel: (storyId: string, level: string) => Promise<void>;
@@ -43,6 +54,7 @@ type ReaderProps = {
   onUploadStoryAudio: (storyId: string, file: File) => Promise<void>;
   onDeleteStoryAudio: (storyId: string) => Promise<void>;
   onMoveStoryToFolder: (storyId: string, folderId: string) => Promise<void>;
+  onMoveFolder: (folderId: string, parentId: string) => Promise<void>;
   onDeleteFolder: (folderId: string) => Promise<void>;
   onDeleteStory: (storyId: string) => Promise<void>;
   story: Story | null;
@@ -75,6 +87,7 @@ export function ReaderView({
   onUploadStoryAudio,
   onDeleteStoryAudio,
   onMoveStoryToFolder,
+  onMoveFolder,
   onDeleteFolder,
   onDeleteStory,
   story,
@@ -93,10 +106,11 @@ export function ReaderView({
   setError
 }: ReaderProps) {
   const groupedStories = useMemo(() => groupStoriesByLevel(stories), [stories]);
-  const folderGroups = useMemo(() => groupStoriesByFolder(stories, storyFolders), [stories, storyFolders]);
+  const folderTree = useMemo(() => buildFolderTree(stories, storyFolders), [stories, storyFolders]);
   const [sidebarMode, setSidebarMode] = useState<StorySidebarMode>("level");
   const [creatingFolder, setCreatingFolder] = useState(false);
   const [movingStoryId, setMovingStoryId] = useState("");
+  const [movingFolderId, setMovingFolderId] = useState("");
   const [collapsedLevelIds, setCollapsedLevelIds] = useState<Set<string>>(() => new Set());
   const [collapsedFolderIds, setCollapsedFolderIds] = useState<Set<string>>(() => new Set());
   const [editingFolderId, setEditingFolderId] = useState("");
@@ -104,8 +118,9 @@ export function ReaderView({
   const [editingStoryId, setEditingStoryId] = useState("");
   const [storyDraft, setStoryDraft] = useState("");
   const [draggingStoryId, setDraggingStoryId] = useState("");
-  const [folderDropId, setFolderDropId] = useState("");
-  const [levelDropId, setLevelDropId] = useState("");
+  const [draggingFolderId, setDraggingFolderId] = useState("");
+  const [folderDropId, setFolderDropId] = useState<string | null>(null);
+  const [levelDropId, setLevelDropId] = useState<string | null>(null);
   const [openMenuId, setOpenMenuId] = useState("");
   const [contentEditStoryId, setContentEditStoryId] = useState("");
   const [editingSentence, setEditingSentence] = useState<Sentence | null>(null);
@@ -150,12 +165,20 @@ export function ReaderView({
     return () => document.removeEventListener("click", closeMenus);
   }, [openMenuId]);
 
-  async function addFolder() {
+  async function addFolder(parentId = "") {
     if (creatingFolder) return;
     setCreatingFolder(true);
+    setOpenMenuId("");
     setError("");
     try {
-      const folder = await onCreateFolder();
+      const folder = await onCreateFolder(parentId);
+      if (parentId) {
+        setCollapsedFolderIds((current) => {
+          const next = new Set(current);
+          next.delete(parentId);
+          return next;
+        });
+      }
       setEditingFolderId(folder.id);
       setFolderDraft(folder.name);
     } catch (caught) {
@@ -269,30 +292,89 @@ export function ReaderView({
     return stories.find((item) => item.id === storyId)?.level || "";
   }
 
+  function dragHasType(event: DragEvent<HTMLElement>, type: string) {
+    return Array.from(event.dataTransfer.types).includes(type);
+  }
+
   function draggedStoryId(event: DragEvent<HTMLElement>) {
-    return draggingStoryId || event.dataTransfer.getData("text/plain");
+    if (draggingFolderId || dragHasType(event, FOLDER_DRAG_TYPE)) return "";
+    return draggingStoryId || event.dataTransfer.getData(STORY_DRAG_TYPE) || event.dataTransfer.getData("text/plain");
+  }
+
+  function draggedFolderId(event: DragEvent<HTMLElement>) {
+    return draggingFolderId || event.dataTransfer.getData(FOLDER_DRAG_TYPE);
   }
 
   function clearDragState() {
     setDraggingStoryId("");
-    setFolderDropId("");
-    setLevelDropId("");
+    setDraggingFolderId("");
+    setFolderDropId(null);
+    setLevelDropId(null);
   }
 
   function beginStoryDrag(event: DragEvent<HTMLDivElement>, storyId: string) {
     setDraggingStoryId(storyId);
     setOpenMenuId("");
     event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData(STORY_DRAG_TYPE, storyId);
     event.dataTransfer.setData("text/plain", storyId);
   }
 
+  function beginFolderDrag(event: DragEvent<HTMLElement>, folderId: string) {
+    const target = event.target as HTMLElement;
+    if (target.closest("button,input")) {
+      event.preventDefault();
+      return;
+    }
+
+    setDraggingFolderId(folderId);
+    setOpenMenuId("");
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData(FOLDER_DRAG_TYPE, folderId);
+    event.dataTransfer.setData("text/plain", folderId);
+  }
+
+  function canMoveFolderToParent(folderId: string, parentId: string) {
+    const currentParentId = storyFolders.find((folder) => folder.id === folderId)?.parentId || "";
+    return Boolean(
+      folderId &&
+        parentId !== currentParentId &&
+        folderId !== parentId &&
+        !isSameOrDescendantFolder(parentId, folderId)
+    );
+  }
+
+  async function moveFolderToParent(folderId: string, parentId: string) {
+    if (movingFolderId) return;
+
+    setMovingFolderId(folderId);
+    setOpenMenuId("");
+    setError("");
+    try {
+      await onMoveFolder(folderId, parentId);
+      if (parentId) {
+        setCollapsedFolderIds((current) => {
+          const next = new Set(current);
+          next.delete(parentId);
+          return next;
+        });
+      }
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Folder could not be moved.");
+    } finally {
+      setMovingFolderId("");
+    }
+  }
+
   function markFolderDropTarget(event: DragEvent<HTMLElement>, folderId: string) {
-    const draggedId = draggedStoryId(event);
-    if (!draggedId) return;
+    const storyId = draggedStoryId(event);
+    const folderToMoveId = draggedFolderId(event);
+    if (!storyId && !canMoveFolderToParent(folderToMoveId, folderId)) return;
     event.preventDefault();
+    event.stopPropagation();
     event.dataTransfer.dropEffect = "move";
     setFolderDropId(folderId);
-    setLevelDropId("");
+    setLevelDropId(null);
   }
 
   function markLevelDropTarget(event: DragEvent<HTMLElement>, level: string) {
@@ -301,14 +383,22 @@ export function ReaderView({
     event.preventDefault();
     event.dataTransfer.dropEffect = "move";
     setLevelDropId(level);
-    setFolderDropId("");
+    setFolderDropId(null);
   }
 
-  async function dropStoryInFolder(event: DragEvent<HTMLElement>, folderId: string) {
+  async function dropInFolder(event: DragEvent<HTMLElement>, folderId: string) {
     event.preventDefault();
     event.stopPropagation();
+    const folderToMoveId = draggedFolderId(event);
     const storyId = draggedStoryId(event);
     clearDragState();
+
+    if (folderToMoveId) {
+      if (!canMoveFolderToParent(folderToMoveId, folderId) || movingFolderId) return;
+      await moveFolderToParent(folderToMoveId, folderId);
+      return;
+    }
+
     if (!storyId || movingStoryId) return;
 
     const sourceFolderId = storyFolderId(storyId);
@@ -528,14 +618,21 @@ export function ReaderView({
     }
   }
 
-  async function deleteFolder(folder: StoryFolder, storyCount: number) {
-    if (
-      storyCount > 0 &&
-      !window.confirm(
-        `Delete "${folder.name}" and its ${storyCount} ${storyCount === 1 ? "story" : "stories"}? Saved cards from those stories will stay in Cards.`
-      )
-    ) {
-      return;
+  function descendantFolderCount(node: FolderTreeNode): number {
+    return node.children.reduce((total, child) => total + 1 + descendantFolderCount(child), 0);
+  }
+
+  async function deleteFolder(folder: StoryFolder, storyCount: number, subfolderCount = 0) {
+    if (storyCount > 0 || subfolderCount > 0) {
+      const contents = [
+        storyCount ? `${storyCount} ${storyCount === 1 ? "story" : "stories"}` : "",
+        subfolderCount ? `${subfolderCount} ${subfolderCount === 1 ? "subfolder" : "subfolders"}` : ""
+      ]
+        .filter(Boolean)
+        .join(" and ");
+      if (!window.confirm(`Delete "${folder.name}" and its ${contents}? Saved cards from those stories will stay in Cards.`)) {
+        return;
+      }
     }
 
     setOpenMenuId("");
@@ -653,6 +750,130 @@ export function ReaderView({
     );
   }
 
+  function renderFolderMenu(folder: StoryFolder, node: FolderTreeNode) {
+    const menuId = `folder-${folder.id}`;
+    return (
+      <div className="row-menu-wrap" onClick={(event) => event.stopPropagation()}>
+        <button
+          className="row-menu-button"
+          type="button"
+          onClick={(event) => toggleMenu(event, menuId)}
+          aria-label={`Folder options for ${folder.name}`}
+          title="Folder options"
+        >
+          <MoreHorizontal size={15} aria-hidden="true" />
+        </button>
+        {openMenuId === menuId && (
+          <div className="row-menu" role="menu">
+            <button type="button" onClick={() => void addFolder(folder.id)} role="menuitem">
+              <FolderPlus size={14} aria-hidden="true" />
+              Add Subfolder
+            </button>
+            <button
+              className="danger-menu-item"
+              type="button"
+              onClick={() => void deleteFolder(folder, node.storyCount, descendantFolderCount(node))}
+              role="menuitem"
+            >
+              <Trash2 size={14} aria-hidden="true" />
+              Delete
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  function renderFolderNode(node: FolderTreeNode) {
+    const folder = node.folder;
+    const isCollapsed = collapsedFolderIds.has(folder.id);
+    const isEditing = editingFolderId === folder.id;
+    const isDragging = draggingFolderId === folder.id;
+
+    return (
+      <section
+        className={`level-folder folder-section ${folderDropId === folder.id ? "has-drag-target" : ""} ${
+          isDragging ? "dragging-folder" : ""
+        }`}
+        key={`folder-${folder.id}`}
+        style={{ "--folder-indent": `${node.depth * 0.85}rem` } as CSSProperties}
+        onDragOver={(event) => markFolderDropTarget(event, folder.id)}
+        onDrop={(event) => void dropInFolder(event, folder.id)}
+      >
+        <div
+          className="level-folder-head folder-folder-head"
+          draggable={!isEditing && movingFolderId !== folder.id}
+          onDragStart={!isEditing ? (event) => beginFolderDrag(event, folder.id) : undefined}
+          onDragEnd={clearDragState}
+        >
+          <button
+            className="folder-collapse-button"
+            type="button"
+            onClick={() => toggleFolder(folder.id)}
+            aria-label={`${isCollapsed ? "Expand" : "Collapse"} ${folder.name}`}
+            title={isCollapsed ? "Expand section" : "Collapse section"}
+          >
+            {isCollapsed ? <ChevronRight size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}
+          </button>
+          <Folder size={15} aria-hidden="true" />
+          {isEditing ? (
+            <input
+              className="folder-name-input"
+              value={folderDraft}
+              onChange={(event) => setFolderDraft(event.target.value)}
+              onBlur={(event) => void finishRenamingFolder(folder, event.currentTarget.value)}
+              onFocus={(event) => event.currentTarget.select()}
+              onKeyDown={(event) => handleFolderNameKey(event, folder)}
+              aria-label="Folder name"
+              autoFocus
+            />
+          ) : (
+            <button
+              className="folder-name-button"
+              type="button"
+              onDoubleClick={() => startRenamingFolder(folder)}
+              title="Double-click to rename"
+            >
+              {folder.name}
+            </button>
+          )}
+          {renderFolderMenu(folder, node)}
+        </div>
+        {!isCollapsed && node.storyCount === 0 && <p className="folder-empty muted">No stories yet.</p>}
+        {!isCollapsed && node.stories.map((item) => renderStoryRow(item))}
+        {!isCollapsed && node.children.map((child) => renderFolderNode(child))}
+      </section>
+    );
+  }
+
+  function renderUnfiledFolder() {
+    const isCollapsed = collapsedFolderIds.has("");
+    return (
+      <section
+        className={`level-folder folder-section ${folderDropId === "" ? "has-drag-target" : ""}`}
+        key="folder-unfiled"
+        style={{ "--folder-indent": "0rem" } as CSSProperties}
+        onDragOver={(event) => markFolderDropTarget(event, "")}
+        onDrop={(event) => void dropInFolder(event, "")}
+      >
+        <div className="level-folder-head folder-folder-head unfiled-folder-head">
+          <button
+            className="folder-collapse-button"
+            type="button"
+            onClick={() => toggleFolder("")}
+            aria-label={`${isCollapsed ? "Expand" : "Collapse"} Unfiled`}
+            title={isCollapsed ? "Expand section" : "Collapse section"}
+          >
+            {isCollapsed ? <ChevronRight size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}
+          </button>
+          <span className="folder-name-static">Unfiled</span>
+        </div>
+        {!isCollapsed && folderTree.unfiledStories.length === 0 && <p className="folder-empty muted">No stories yet.</p>}
+        {!isCollapsed && folderTree.unfiledStories.map((item) => renderStoryRow(item))}
+      </section>
+    );
+  }
+
   return (
     <main className="reader-grid">
       <aside className="story-sidebar" aria-label="Stories">
@@ -712,84 +933,12 @@ export function ReaderView({
                 </section>
               );
             })}
-          {sidebarMode === "folder" &&
-            folderGroups.map(([folder, folderStories]) => {
-              const isCollapsed = collapsedFolderIds.has(folder.id);
-              const isUnfiled = !folder.id;
-              const menuId = `folder-${folder.id}`;
-              return (
-                <section
-                  className={`level-folder folder-section ${folderDropId === folder.id ? "has-drag-target" : ""}`}
-                  key={folder.id ? `folder-${folder.id}` : "folder-unfiled"}
-                  onDragOver={(event) => markFolderDropTarget(event, folder.id)}
-                  onDrop={(event) => void dropStoryInFolder(event, folder.id)}
-                >
-                  <div className={`level-folder-head folder-folder-head ${isUnfiled ? "unfiled-folder-head" : ""}`}>
-                    <button
-                      className="folder-collapse-button"
-                      type="button"
-                      onClick={() => toggleFolder(folder.id)}
-                      aria-label={`${isCollapsed ? "Expand" : "Collapse"} ${folder.name}`}
-                      title={isCollapsed ? "Expand section" : "Collapse section"}
-                    >
-                      {isCollapsed ? <ChevronRight size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}
-                    </button>
-                    {!isUnfiled && <Folder size={15} aria-hidden="true" />}
-                    {isUnfiled ? (
-                      <span className="folder-name-static">Unfiled</span>
-                    ) : editingFolderId === folder.id ? (
-                      <input
-                        className="folder-name-input"
-                        value={folderDraft}
-                        onChange={(event) => setFolderDraft(event.target.value)}
-                        onBlur={(event) => void finishRenamingFolder(folder, event.currentTarget.value)}
-                        onFocus={(event) => event.currentTarget.select()}
-                        onKeyDown={(event) => handleFolderNameKey(event, folder)}
-                        aria-label="Folder name"
-                        autoFocus
-                      />
-                    ) : (
-                      <button
-                        className="folder-name-button"
-                        type="button"
-                        onDoubleClick={() => startRenamingFolder(folder)}
-                        title="Double-click to rename"
-                      >
-                        {folder.name}
-                      </button>
-                    )}
-                    {!isUnfiled && (
-                      <div className="row-menu-wrap" onClick={(event) => event.stopPropagation()}>
-                        <button
-                          className="row-menu-button"
-                          type="button"
-                          onClick={(event) => toggleMenu(event, menuId)}
-                          aria-label={`Folder options for ${folder.name}`}
-                          title="Folder options"
-                        >
-                          <MoreHorizontal size={15} aria-hidden="true" />
-                        </button>
-                        {openMenuId === menuId && (
-                          <div className="row-menu" role="menu">
-                            <button
-                              className="danger-menu-item"
-                              type="button"
-                              onClick={() => void deleteFolder(folder, folderStories.length)}
-                              role="menuitem"
-                            >
-                              <Trash2 size={14} aria-hidden="true" />
-                              Delete
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                  {!isCollapsed && folderStories.length === 0 && <p className="folder-empty muted">No stories yet.</p>}
-                  {!isCollapsed && folderStories.map((item) => renderStoryRow(item))}
-                </section>
-              );
-            })}
+          {sidebarMode === "folder" && (
+            <>
+              {renderUnfiledFolder()}
+              {folderTree.nodes.map((node) => renderFolderNode(node))}
+            </>
+          )}
         </div>
       </aside>
 

@@ -401,9 +401,13 @@ h4 {
 
 .folder-section {
   border: 1px solid transparent;
-  margin: 0 -0.2rem;
+  margin: 0 -0.2rem 0 calc(-0.2rem + var(--folder-indent, 0rem));
   padding: 0.14rem 0.2rem 0.2rem;
   transition: background-color 120ms ease-out, border-color 120ms ease-out;
+}
+
+.folder-section.dragging-folder {
+  opacity: 0.48;
 }
 
 .folder-section.has-drag-target {
@@ -459,6 +463,14 @@ h4 {
   letter-spacing: 0;
   padding-left: 0;
   text-transform: none;
+}
+
+.folder-folder-head[draggable="true"] {
+  cursor: grab;
+}
+
+.folder-folder-head[draggable="true"]:active {
+  cursor: grabbing;
 }
 
 .unfiled-folder-head {
@@ -640,7 +652,7 @@ h4 {
   background: var(--surface-strong);
   border: 1px solid var(--border);
   box-shadow: 0 8px 20px rgba(39, 43, 36, 0.12);
-  min-width: 8.5rem;
+  min-width: 10rem;
   padding: 0.25rem;
   position: absolute;
   right: 0;

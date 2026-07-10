@@ -47,6 +47,7 @@ export type StorySummary = {
 export type StoryFolder = {
   id: string;
   name: string;
+  parentId: string;
 };
 
 export type MinedCard = {
