@@ -9,11 +9,13 @@ import {
   Folder,
   FolderPlus,
   List,
+  ListFilter,
   MoreHorizontal,
   PencilLine,
   Plus,
   RotateCcw,
   Save,
+  Search,
   Trash2,
   X
 } from "lucide-react";
@@ -33,6 +35,7 @@ import { SentenceEditModal } from "./SentenceEditModal";
 import { StoryAudioPlayer } from "./StoryAudioPlayer";
 
 type StorySidebarMode = "level" | "folder";
+type StoryStatusFilter = "all" | "open" | "completed";
 
 function cleanSentenceText(value: string) {
   return value.trim().replace(/\s+/g, " ");
@@ -40,6 +43,12 @@ function cleanSentenceText(value: string) {
 
 const STORY_DRAG_TYPE = "application/x-learn-croatian-story";
 const FOLDER_DRAG_TYPE = "application/x-learn-croatian-folder";
+const STORY_STATUS_FILTER_MENU_ID = "story-status-filter";
+const STORY_STATUS_FILTERS: Array<{ value: StoryStatusFilter; label: string }> = [
+  { value: "all", label: "All" },
+  { value: "open", label: "Open" },
+  { value: "completed", label: "Completed" }
+];
 
 type ReaderProps = {
   stories: StorySummary[];
@@ -106,8 +115,25 @@ export function ReaderView({
   refreshStoryAndCards,
   setError
 }: ReaderProps) {
-  const groupedStories = useMemo(() => groupStoriesByLevel(stories), [stories]);
-  const folderTree = useMemo(() => buildFolderTree(stories, storyFolders), [stories, storyFolders]);
+  const [storySearchQuery, setStorySearchQuery] = useState("");
+  const [storyStatusFilter, setStoryStatusFilter] = useState<StoryStatusFilter>("all");
+  const storySearchTerm = storySearchQuery.trim().toLocaleLowerCase("hr");
+  const hasStoryStatusFilter = storyStatusFilter !== "all";
+  const filteredStories = useMemo(() => {
+    return stories.filter((item) => {
+      if (storyStatusFilter === "open" && item.completed) return false;
+      if (storyStatusFilter === "completed" && !item.completed) return false;
+      if (!storySearchTerm) return true;
+      return item.title.toLocaleLowerCase("hr").includes(storySearchTerm);
+    });
+  }, [stories, storySearchTerm, storyStatusFilter]);
+  const groupedStories = useMemo(() => groupStoriesByLevel(filteredStories), [filteredStories]);
+  const folderTree = useMemo(() => buildFolderTree(filteredStories, storyFolders), [filteredStories, storyFolders]);
+  const isStoryListFiltered = Boolean(storySearchTerm) || hasStoryStatusFilter;
+  const visibleGroupedStories = useMemo(
+    () => (isStoryListFiltered ? groupedStories.filter(([, levelStories]) => levelStories.length > 0) : groupedStories),
+    [groupedStories, isStoryListFiltered]
+  );
   const [sidebarMode, setSidebarMode] = useState<StorySidebarMode>("level");
   const [creatingFolder, setCreatingFolder] = useState(false);
   const [movingStoryId, setMovingStoryId] = useState("");
@@ -794,8 +820,10 @@ export function ReaderView({
   }
 
   function renderFolderNode(node: FolderTreeNode) {
+    if (isStoryListFiltered && node.storyCount === 0) return null;
+
     const folder = node.folder;
-    const isCollapsed = collapsedFolderIds.has(folder.id);
+    const isCollapsed = !isStoryListFiltered && collapsedFolderIds.has(folder.id);
     const isEditing = editingFolderId === folder.id;
     const isDragging = draggingFolderId === folder.id;
 
@@ -856,7 +884,7 @@ export function ReaderView({
   }
 
   function renderUnfiledFolder() {
-    const isCollapsed = collapsedFolderIds.has("");
+    const isCollapsed = !isStoryListFiltered && collapsedFolderIds.has("");
     return (
       <section
         className={`level-folder folder-section ${folderDropId === "" ? "has-drag-target" : ""}`}
@@ -889,6 +917,59 @@ export function ReaderView({
         <div className="panel-heading">
           <h2>Stories</h2>
         </div>
+        <div className="story-search">
+          <Search size={15} aria-hidden="true" />
+          <input
+            type="search"
+            value={storySearchQuery}
+            onChange={(event) => setStorySearchQuery(event.target.value)}
+            placeholder="Search titles"
+            aria-label="Search stories by title"
+            spellCheck={false}
+          />
+          {storySearchQuery && (
+            <button
+              className="story-search-clear icon-button"
+              type="button"
+              onClick={() => setStorySearchQuery("")}
+              aria-label="Clear story search"
+              title="Clear search"
+            >
+              <X size={14} aria-hidden="true" />
+            </button>
+          )}
+          <div className="story-filter-menu-wrap" onClick={(event) => event.stopPropagation()}>
+            <button
+              className={`story-filter-button icon-button ${hasStoryStatusFilter ? "active" : ""}`}
+              type="button"
+              onClick={(event) => toggleMenu(event, STORY_STATUS_FILTER_MENU_ID)}
+              aria-label="Filter stories by status"
+              aria-expanded={openMenuId === STORY_STATUS_FILTER_MENU_ID}
+              title="Filter stories"
+            >
+              <ListFilter size={15} aria-hidden="true" />
+            </button>
+            {openMenuId === STORY_STATUS_FILTER_MENU_ID && (
+              <div className="story-filter-menu" role="menu" aria-label="Status filters">
+                {STORY_STATUS_FILTERS.map((filter) => (
+                  <button
+                    className={storyStatusFilter === filter.value ? "active" : ""}
+                    type="button"
+                    onClick={() => {
+                      setStoryStatusFilter(filter.value);
+                      setOpenMenuId("");
+                    }}
+                    role="menuitemradio"
+                    aria-checked={storyStatusFilter === filter.value}
+                    key={filter.value}
+                  >
+                    <span>{filter.label}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
         <div className="sidebar-mode-toggle" role="group" aria-label="Story organization">
           <button type="button" className={sidebarMode === "level" ? "active" : ""} onClick={() => setSidebarMode("level")}>
             <List size={15} aria-hidden="true" />
@@ -916,9 +997,13 @@ export function ReaderView({
         )}
         <div className="story-list">
           {stories.length === 0 && <p className="muted">Import a Croatian text to begin.</p>}
-          {sidebarMode === "level" &&
-            groupedStories.map(([level, levelStories]) => {
-              const isCollapsed = collapsedLevelIds.has(level);
+          {stories.length > 0 && isStoryListFiltered && filteredStories.length === 0 && (
+            <p className="story-search-empty muted">No matching stories.</p>
+          )}
+          {filteredStories.length > 0 &&
+            sidebarMode === "level" &&
+            visibleGroupedStories.map(([level, levelStories]) => {
+              const isCollapsed = !isStoryListFiltered && collapsedLevelIds.has(level);
               return (
                 <section
                   className={`level-folder level-drop-section ${levelDropId === level ? "has-drag-target" : ""}`}
@@ -942,9 +1027,9 @@ export function ReaderView({
                 </section>
               );
             })}
-          {sidebarMode === "folder" && (
+          {filteredStories.length > 0 && sidebarMode === "folder" && (
             <>
-              {renderUnfiledFolder()}
+              {(!isStoryListFiltered || folderTree.unfiledStories.length > 0) && renderUnfiledFolder()}
               {folderTree.nodes.map((node) => renderFolderNode(node))}
             </>
           )}

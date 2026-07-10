@@ -1,4 +1,4 @@
-import { Send, Volume2 } from "lucide-react";
+import { Search, Send, Volume2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { apiJson } from "../../api/client";
 import { isSynced, syncLabel } from "../../domain/cards";
@@ -13,11 +13,27 @@ type CardsProps = {
 
 type CardsTab = "pending" | "synced";
 
+function cardMatchesSearch(card: MinedCard, searchTerm: string) {
+  const searchableText = [
+    card.croatianSentence,
+    card.englishTranslation,
+    card.targetText,
+    card.hint,
+    card.note
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLocaleLowerCase("hr");
+
+  return searchableText.includes(searchTerm);
+}
+
 export function CardsView({ cards, reloadCards, setError }: CardsProps) {
   const [syncing, setSyncing] = useState(false);
   const [playingId, setPlayingId] = useState("");
   const [message, setMessage] = useState("");
   const [selectedCardsTab, setSelectedCardsTab] = useState<CardsTab | "">("");
+  const [cardSearchQuery, setCardSearchQuery] = useState("");
   const [editingId, setEditingId] = useState("");
   const pendingCount = cards.filter((card) => !isSynced(card)).length;
   const syncedCount = cards.filter(isSynced).length;
@@ -25,7 +41,9 @@ export function CardsView({ cards, reloadCards, setError }: CardsProps) {
   const pendingCards = cards.filter((card) => !isSynced(card));
   const syncedCards = cards.filter(isSynced);
   const activeCardsTab: CardsTab = selectedCardsTab || (pendingCount > 0 ? "pending" : "synced");
-  const visibleCards = activeCardsTab === "pending" ? pendingCards : syncedCards;
+  const tabCards = activeCardsTab === "pending" ? pendingCards : syncedCards;
+  const cardSearchTerm = cardSearchQuery.trim().toLocaleLowerCase("hr");
+  const visibleCards = cardSearchTerm ? tabCards.filter((card) => cardMatchesSearch(card, cardSearchTerm)) : tabCards;
   const editingCard = cards.find((card) => card.id === editingId) || null;
 
   useEffect(() => {
@@ -153,30 +171,60 @@ export function CardsView({ cards, reloadCards, setError }: CardsProps) {
       {cards.length === 0 && <p className="muted">No cards yet. Mine a sentence from the reader.</p>}
       {cards.length > 0 && (
         <>
-          <div className="cards-page-tabs" role="tablist" aria-label="Card sync status">
-            <button
-              className={activeCardsTab === "pending" ? "active" : ""}
-              role="tab"
-              aria-selected={activeCardsTab === "pending"}
-              onClick={() => selectCardsTab("pending")}
-            >
-              Pending
-              <span>{pendingCount}</span>
-            </button>
-            <button
-              className={activeCardsTab === "synced" ? "active" : ""}
-              role="tab"
-              aria-selected={activeCardsTab === "synced"}
-              onClick={() => selectCardsTab("synced")}
-            >
-              Synced
-              <span>{syncedCount}</span>
-            </button>
+          <div className="cards-list-controls">
+            <div className="cards-page-tabs" role="tablist" aria-label="Card sync status">
+              <button
+                className={activeCardsTab === "pending" ? "active" : ""}
+                role="tab"
+                aria-selected={activeCardsTab === "pending"}
+                onClick={() => selectCardsTab("pending")}
+              >
+                Pending
+                <span>{pendingCount}</span>
+              </button>
+              <button
+                className={activeCardsTab === "synced" ? "active" : ""}
+                role="tab"
+                aria-selected={activeCardsTab === "synced"}
+                onClick={() => selectCardsTab("synced")}
+              >
+                Synced
+                <span>{syncedCount}</span>
+              </button>
+            </div>
+            <div className="card-search">
+              <Search size={15} aria-hidden="true" />
+              <input
+                type="search"
+                value={cardSearchQuery}
+                onChange={(event) => setCardSearchQuery(event.target.value)}
+                placeholder="Search cards"
+                aria-label="Search cards"
+                spellCheck={false}
+              />
+              {cardSearchQuery && (
+                <button
+                  className="card-search-clear icon-button"
+                  type="button"
+                  onClick={() => setCardSearchQuery("")}
+                  aria-label="Clear card search"
+                  title="Clear search"
+                >
+                  <X size={14} aria-hidden="true" />
+                </button>
+              )}
+            </div>
           </div>
 
           <section className="cards-list" role="tabpanel" aria-label={activeCardsTab === "pending" ? "Pending cards" : "Synced cards"}>
             {visibleCards.length === 0 && (
-              <p className="muted">{activeCardsTab === "pending" ? "No pending cards." : "No synced cards."}</p>
+              <p className="muted">
+                {cardSearchTerm
+                  ? "No matching cards."
+                  : activeCardsTab === "pending"
+                    ? "No pending cards."
+                    : "No synced cards."}
+              </p>
             )}
             {visibleCards.map(renderCard)}
           </section>
