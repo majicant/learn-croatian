@@ -40,7 +40,6 @@ function App() {
     [cards, selectedSentence, story]
   );
   const pages = useMemo(() => buildPages(story?.paragraphs || []), [story]);
-  const currentSummary = stories.find((item) => item.id === story?.id);
 
   async function loadStories(nextSelectedId?: string) {
     const payload = await apiJson<{ stories: StorySummary[] }>("/api/texts");
@@ -146,13 +145,12 @@ function App() {
     window.getSelection()?.removeAllRanges();
   }
 
-  async function toggleCompleted(completed: boolean) {
-    if (!story) return;
-    await apiJson(`/api/progress/${story.id}`, {
+  async function toggleCompleted(storyId: string, completed: boolean) {
+    await apiJson(`/api/progress/${storyId}`, {
       method: "PATCH",
       body: JSON.stringify({ completed })
     });
-    await loadStories();
+    setStories((current) => current.map((item) => (item.id === storyId ? { ...item, completed } : item)));
   }
 
   async function createStoryFolder() {
@@ -315,7 +313,6 @@ function App() {
           onAnalyzeSentence={analyzeSentence}
           onCloseSentence={clearSelectedSentence}
           onToggleCompleted={toggleCompleted}
-          completed={Boolean(currentSummary?.completed)}
           refreshStoryAndCards={refreshStoryAndCards}
           setError={setError}
         />

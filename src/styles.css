@@ -155,7 +155,6 @@ h4 {
 .button-row,
 .story-meta,
 .status,
-.complete-toggle,
 .page-controls,
 .checkline,
 .file-input,
@@ -507,19 +506,21 @@ h4 {
   border-color: #c9ded5;
 }
 
-.story-row-main {
+.story-row-content {
   align-content: start;
-  align-items: start;
+  display: grid;
+  gap: 0.28rem;
+  min-height: 2.45rem;
+}
+
+.story-row-main {
+  align-items: flex-start;
   background: transparent;
   border: 0;
   color: var(--ink);
-  display: grid;
-  gap: 0.28rem;
-  grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: auto auto;
-  justify-content: stretch;
-  justify-items: stretch;
-  min-height: 2.45rem;
+  display: flex;
+  justify-content: flex-start;
+  min-height: 0;
   padding: 0;
   text-align: left;
   width: 100%;
@@ -530,7 +531,8 @@ h4 {
 }
 
 .story-row-editing {
-  align-content: center;
+  align-items: center;
+  min-height: 2.45rem;
 }
 
 .story-title {
@@ -571,12 +573,26 @@ h4 {
   white-space: nowrap;
 }
 
+.status-button {
+  background: transparent;
+  border: 0;
+  color: var(--warning);
+  font-size: inherit;
+  justify-content: flex-start;
+  min-height: 1rem;
+  padding: 0;
+}
+
 .status svg {
   flex: 0 0 auto;
 }
 
 .status.done {
   color: var(--accent);
+}
+
+.status-button:hover {
+  color: #1f4f44;
 }
 
 .folder-empty {
@@ -649,13 +665,6 @@ h4 {
   text-transform: uppercase;
 }
 
-.complete-toggle {
-  color: var(--muted);
-  gap: 0.45rem;
-  white-space: nowrap;
-}
-
-.complete-toggle input,
 .checkline input {
   width: auto;
 }

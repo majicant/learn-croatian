@@ -47,8 +47,7 @@ type ReaderProps = {
   onChooseSentence: (sentence: Sentence) => void;
   onAnalyzeSentence: (sentence: Sentence, force?: boolean) => Promise<void>;
   onCloseSentence: () => void;
-  onToggleCompleted: (completed: boolean) => Promise<void>;
-  completed: boolean;
+  onToggleCompleted: (storyId: string, completed: boolean) => Promise<void>;
   refreshStoryAndCards: () => Promise<void>;
   setError: (message: string) => void;
 };
@@ -79,7 +78,6 @@ export function ReaderView({
   onAnalyzeSentence,
   onCloseSentence,
   onToggleCompleted,
-  completed,
   refreshStoryAndCards,
   setError
 }: ReaderProps) {
@@ -101,6 +99,7 @@ export function ReaderView({
   const [openMenuId, setOpenMenuId] = useState("");
   const [contentEditStoryId, setContentEditStoryId] = useState("");
   const [editingSentence, setEditingSentence] = useState<Sentence | null>(null);
+  const [updatingProgressStoryId, setUpdatingProgressStoryId] = useState("");
 
   const isEditingStoryContent = Boolean(story && contentEditStoryId === story.id);
 
@@ -336,6 +335,20 @@ export function ReaderView({
     onCloseSentence();
   }
 
+  async function setStoryCompletion(storyId: string, nextCompleted: boolean) {
+    if (updatingProgressStoryId) return;
+    setUpdatingProgressStoryId(storyId);
+    setOpenMenuId("");
+    setError("");
+    try {
+      await onToggleCompleted(storyId, nextCompleted);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Story progress could not be updated.");
+    } finally {
+      setUpdatingProgressStoryId("");
+    }
+  }
+
   async function saveEditedSentence(sentence: Sentence, croatian: string) {
     if (!story) return;
     setError("");
@@ -453,27 +466,36 @@ export function ReaderView({
             />
           </div>
         ) : (
-          <button
-            className="story-row-main"
-            type="button"
-            onClick={() => selectStoryFromSidebar(item.id)}
-            onDoubleClick={() => startRenamingStory(item)}
-          >
-            <span className="story-title-line">
-              <span className="story-title">{item.title}</span>
-              {item.hasAudio && (
-                <span className="story-audio-indicator" aria-label="Has audio" title="Has audio">
-                  <AudioLines size={14} aria-hidden="true" />
-                </span>
-              )}
-            </span>
+          <div className="story-row-content">
+            <button
+              className="story-row-main"
+              type="button"
+              onClick={() => selectStoryFromSidebar(item.id)}
+              onDoubleClick={() => startRenamingStory(item)}
+            >
+              <span className="story-title-line">
+                <span className="story-title">{item.title}</span>
+                {item.hasAudio && (
+                  <span className="story-audio-indicator" aria-label="Has audio" title="Has audio">
+                    <AudioLines size={14} aria-hidden="true" />
+                  </span>
+                )}
+              </span>
+            </button>
             <span className="story-meta">
-              <span className={item.completed ? "status done" : "status"}>
+              <button
+                className={`status status-button ${item.completed ? "done" : ""}`}
+                type="button"
+                onClick={() => void setStoryCompletion(item.id, !item.completed)}
+                disabled={updatingProgressStoryId === item.id}
+                aria-label={item.completed ? `Set ${item.title} to open` : `Mark ${item.title} complete`}
+                title={item.completed ? "Set to open" : "Mark complete"}
+              >
                 {item.completed ? <CheckCircle2 size={14} aria-hidden="true" /> : <Circle size={14} aria-hidden="true" />}
                 {item.completed ? "Completed" : "Open"}
-              </span>
+              </button>
             </span>
-          </button>
+          </div>
         )}
         {renderStoryMenu(item)}
       </div>
@@ -629,18 +651,14 @@ export function ReaderView({
                 <p className="level-label">{story.level}</p>
                 <h1>{story.title}</h1>
               </div>
-              <div className="reader-actions">
-                <label className="complete-toggle">
-                  <input type="checkbox" checked={completed} onChange={(event) => void onToggleCompleted(event.target.checked)} />
-                  Completed
-                </label>
-                {isEditingStoryContent && (
+              {isEditingStoryContent && (
+                <div className="reader-actions">
                   <button className="edit-mode-exit-button" type="button" onClick={clearContentEditing}>
                     <PencilLine size={13} aria-hidden="true" />
                     Exit editing
                   </button>
-                )}
-              </div>
+                </div>
+              )}
             </div>
 
             <div className="page-controls" aria-label="Page controls">
