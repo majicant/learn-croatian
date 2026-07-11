@@ -6,6 +6,12 @@ import { assertFolderId, cleanFolderId, replaceFolderPrefix } from "../utils/fol
 import { slugify } from "../utils/text.js";
 import { readProgress } from "./progressRepository.js";
 
+const croatianNaturalCollator = new Intl.Collator("hr", { numeric: true });
+
+function compareStoryTitles(a, b) {
+  return croatianNaturalCollator.compare(a.title, b.title);
+}
+
 export function assertStoryId(id) {
   if (!/^[a-zA-Z0-9_-]+$/.test(id)) {
     const error = new Error("Invalid story id.");
@@ -95,7 +101,7 @@ export async function listStories() {
     };
   });
 
-  return summaries.sort((a, b) => a.title.localeCompare(b.title, "hr"));
+  return summaries.sort(compareStoryTitles);
 }
 
 export function attachCardStatus(story, cards) {

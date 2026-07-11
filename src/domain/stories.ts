@@ -1,6 +1,12 @@
 import { READING_LEVELS } from "../constants";
 import type { ImportPreview, Paragraph, Sentence, Story, StoryFolder, StorySummary } from "../types";
 
+const croatianNaturalCollator = new Intl.Collator("hr", { numeric: true });
+
+function compareStoryTitles(a: StorySummary, b: StorySummary) {
+  return croatianNaturalCollator.compare(a.title, b.title);
+}
+
 export function splitPreview(text: string): ImportPreview {
   const sentencePattern = /[^.!?\u2026]+(?:[.!?\u2026]+["'")\]]*)?|[^.!?\u2026]+$/gu;
   const paragraphs = text
@@ -143,7 +149,7 @@ export function groupStoriesByLevel(stories: StorySummary[]) {
 
   return Array.from(grouped.entries()).map(
     ([level, levelStories]) =>
-      [level, [...levelStories].sort((a, b) => a.title.localeCompare(b.title, "hr"))] as [string, StorySummary[]]
+      [level, [...levelStories].sort(compareStoryTitles)] as [string, StorySummary[]]
   ).sort(([a], [b]) => {
     const aIndex = READING_LEVELS.indexOf(a);
     const bIndex = READING_LEVELS.indexOf(b);
@@ -202,7 +208,7 @@ export function buildFolderTree(stories: StorySummary[], folders: StoryFolder[])
   }
 
   const sortStories = (items: StorySummary[]) =>
-    [...items].sort((a, b) => a.title.localeCompare(b.title, "hr"));
+    [...items].sort(compareStoryTitles);
   const sortFolders = (items: StoryFolder[]) =>
     [...items].sort((a, b) => a.name.localeCompare(b.name, "hr") || a.id.localeCompare(b.id, "hr"));
 
