@@ -2,11 +2,12 @@ import { Search, Send, Volume2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { apiJson } from "../../api/client";
 import { isSynced, syncLabel } from "../../domain/cards";
-import type { MinedCard } from "../../types";
+import type { MinedCard, StorySummary } from "../../types";
 import { CardEditModal } from "./CardEditModal";
 
 type CardsProps = {
   cards: MinedCard[];
+  stories: StorySummary[];
   reloadCards: () => Promise<void>;
   setError: (message: string) => void;
 };
@@ -28,7 +29,7 @@ function cardMatchesSearch(card: MinedCard, searchTerm: string) {
   return searchableText.includes(searchTerm);
 }
 
-export function CardsView({ cards, reloadCards, setError }: CardsProps) {
+export function CardsView({ cards, stories, reloadCards, setError }: CardsProps) {
   const [syncing, setSyncing] = useState(false);
   const [playingId, setPlayingId] = useState("");
   const [message, setMessage] = useState("");
@@ -45,6 +46,9 @@ export function CardsView({ cards, reloadCards, setError }: CardsProps) {
   const cardSearchTerm = cardSearchQuery.trim().toLocaleLowerCase("hr");
   const visibleCards = cardSearchTerm ? tabCards.filter((card) => cardMatchesSearch(card, cardSearchTerm)) : tabCards;
   const editingCard = cards.find((card) => card.id === editingId) || null;
+  const editingCardStoryAudioFile = editingCard
+    ? stories.find((story) => story.id === editingCard.storyId)?.audioFile || null
+    : null;
 
   useEffect(() => {
     if (!editingId || editingCard) return;
@@ -232,11 +236,13 @@ export function CardsView({ cards, reloadCards, setError }: CardsProps) {
       )}
       {editingCard && (
         <CardEditModal
+          key={editingCard.id}
           card={editingCard}
           onClose={cancelEdit}
           onCardsChanged={reloadCards}
           setError={setError}
           onMessage={setMessage}
+          storyAudioFile={editingCardStoryAudioFile}
         />
       )}
     </main>

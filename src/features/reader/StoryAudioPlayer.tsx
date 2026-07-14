@@ -5,12 +5,21 @@ import type { CSSProperties, ChangeEvent, PointerEvent } from "react";
 type StoryAudioPlayerProps = {
   audioFile: string;
   title: string;
+  initialTime?: number;
+  onPlaybackStart?: () => void;
+  onStatusChange?: (status: StoryAudioStatus) => void;
+  pauseRequest?: number;
   setError: (message: string) => void;
+};
+
+export type StoryAudioStatus = {
+  currentTime: number;
+  duration: number;
 };
 
 const playbackRates = [1, 0.9, 0.75, 0.5];
 
-function formatTime(seconds: number) {
+export function formatAudioTime(seconds: number) {
   if (!Number.isFinite(seconds) || seconds <= 0) return "0:00";
 
   const rounded = Math.floor(seconds);
@@ -29,8 +38,21 @@ function finiteDuration(audio: HTMLAudioElement, fallback: number) {
   return Number.isFinite(audio.duration) ? audio.duration : fallback;
 }
 
-export function StoryAudioPlayer({ audioFile, title, setError }: StoryAudioPlayerProps) {
+export function StoryAudioPlayer({
+  audioFile,
+  title,
+  initialTime = 0,
+  onPlaybackStart,
+  onStatusChange,
+  pauseRequest = 0,
+  setError
+}: StoryAudioPlayerProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const initialSeekAppliedRef = useRef(false);
+  const onPlaybackStartRef = useRef(onPlaybackStart);
+  const onStatusChangeRef = useRef(onStatusChange);
+  const reportedStatusRef = useRef<StoryAudioStatus | null>(null);
+  const setErrorRef = useRef(setError);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -38,16 +60,31 @@ export function StoryAudioPlayer({ audioFile, title, setError }: StoryAudioPlaye
   const progress = duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0;
   const source = `/media/${encodeURIComponent(audioFile)}`;
 
+  onPlaybackStartRef.current = onPlaybackStart;
+  onStatusChangeRef.current = onStatusChange;
+  setErrorRef.current = setError;
+
+  function reportStatus(nextStatus: StoryAudioStatus) {
+    const reported = reportedStatusRef.current;
+    if (reported?.currentTime === nextStatus.currentTime && reported.duration === nextStatus.duration) return;
+    reportedStatusRef.current = nextStatus;
+    onStatusChangeRef.current?.(nextStatus);
+  }
+
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
 
-    setCurrentTime(0);
+    const requestedInitialTime = Math.max(0, initialTime);
+    initialSeekAppliedRef.current = false;
+    setCurrentTime(requestedInitialTime);
     setDuration(0);
     setIsPlaying(false);
+    reportedStatusRef.current = null;
+    reportStatus({ currentTime: requestedInitialTime, duration: 0 });
     audio.pause();
     audio.currentTime = 0;
-  }, [audioFile]);
+  }, [audioFile, initialTime]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -55,19 +92,34 @@ export function StoryAudioPlayer({ audioFile, title, setError }: StoryAudioPlaye
     const audioElement: HTMLAudioElement = audio;
 
     function updateDuration() {
-      setDuration(finiteDuration(audioElement, 0));
+      const nextDuration = finiteDuration(audioElement, 0);
+      let nextCurrentTime = audioElement.currentTime || 0;
+      if (!initialSeekAppliedRef.current && nextDuration > 0) {
+        nextCurrentTime = Math.max(0, Math.min(initialTime, nextDuration));
+        audioElement.currentTime = nextCurrentTime;
+        initialSeekAppliedRef.current = true;
+      }
+      setDuration(nextDuration);
+      setCurrentTime(nextCurrentTime);
+      reportStatus({ currentTime: nextCurrentTime, duration: nextDuration });
     }
 
     function updateTime() {
-      setCurrentTime(audioElement.currentTime || 0);
+      const nextCurrentTime = audioElement.currentTime || 0;
+      const nextDuration = finiteDuration(audioElement, 0);
+      setCurrentTime(nextCurrentTime);
+      reportStatus({ currentTime: nextCurrentTime, duration: nextDuration });
     }
 
     function handleError() {
       setIsPlaying(false);
-      setError("Could not play this story's audio file.");
+      setErrorRef.current("Could not play this story's audio file.");
     }
 
-    const handlePlay = () => setIsPlaying(true);
+    const handlePlay = () => {
+      setIsPlaying(true);
+      onPlaybackStartRef.current?.();
+    };
     const handlePause = () => setIsPlaying(false);
     const handleEnded = () => setIsPlaying(false);
 
@@ -92,13 +144,17 @@ export function StoryAudioPlayer({ audioFile, title, setError }: StoryAudioPlaye
       audioElement.removeEventListener("ended", handleEnded);
       audioElement.removeEventListener("error", handleError);
     };
-  }, [audioFile, setError]);
+  }, [audioFile, initialTime]);
 
   useEffect(() => {
     if (audioRef.current) {
       audioRef.current.playbackRate = playbackRate;
     }
   }, [playbackRate]);
+
+  useEffect(() => {
+    audioRef.current?.pause();
+  }, [pauseRequest]);
 
   async function togglePlayback() {
     const audio = audioRef.current;
@@ -125,6 +181,7 @@ export function StoryAudioPlayer({ audioFile, title, setError }: StoryAudioPlaye
     const nextTime = Math.max(0, Math.min(audio.currentTime + seconds, max || audio.currentTime + seconds));
     audio.currentTime = nextTime;
     setCurrentTime(nextTime);
+    reportStatus({ currentTime: nextTime, duration: max });
   }
 
   function seekTo(nextTime: number) {
@@ -135,6 +192,7 @@ export function StoryAudioPlayer({ audioFile, title, setError }: StoryAudioPlaye
     const cleanTime = Math.max(0, Math.min(nextTime, max || nextTime));
     audio.currentTime = cleanTime;
     setCurrentTime(cleanTime);
+    reportStatus({ currentTime: cleanTime, duration: max });
   }
 
   function seek(event: ChangeEvent<HTMLInputElement>) {
@@ -163,7 +221,7 @@ export function StoryAudioPlayer({ audioFile, title, setError }: StoryAudioPlaye
         <span>Story audio</span>
       </div>
       <div className="audio-timeline">
-        <span>{formatTime(currentTime)}</span>
+        <span>{formatAudioTime(currentTime)}</span>
         <input
           type="range"
           min="0"
@@ -177,7 +235,7 @@ export function StoryAudioPlayer({ audioFile, title, setError }: StoryAudioPlaye
           aria-label="Audio progress"
           style={{ "--progress": `${progress}%` } as CSSProperties}
         />
-        <span>{formatTime(duration)}</span>
+        <span>{formatAudioTime(duration)}</span>
         <button
           className="audio-rate-button"
           type="button"

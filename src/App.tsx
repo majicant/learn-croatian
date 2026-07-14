@@ -4,7 +4,7 @@ import {
   Library,
   Settings as SettingsIcon
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { apiJson } from "./api/client";
 import { DEFAULT_SETTINGS } from "./constants";
 import { buildPages, isSameOrDescendantFolder, sentenceList } from "./domain/stories";
@@ -36,6 +36,9 @@ function App() {
   const [loadingStory, setLoadingStory] = useState(false);
   const [analyzingId, setAnalyzingId] = useState("");
   const [error, setError] = useState("");
+  const selectedStoryIdRef = useRef(selectedStoryId);
+
+  selectedStoryIdRef.current = selectedStoryId;
 
   const selectedSentence = useMemo(
     () => sentenceList(story).find((sentence) => sentence.id === selectedSentenceId) || null,
@@ -91,6 +94,13 @@ function App() {
     }
   }
 
+  async function refreshCurrentStory(id: string) {
+    const payload = await apiJson<{ story: Story }>(`/api/texts/${id}`);
+    setStory((current) =>
+      selectedStoryIdRef.current === id && current?.id === id ? payload.story : current
+    );
+  }
+
   async function saveStoryPageIndex(storyId: string, nextPageIndex: number) {
     await apiJson(`/api/progress/${storyId}`, {
       method: "PATCH",
@@ -107,7 +117,11 @@ function App() {
   }
 
   async function refreshStoryAndCards() {
-    await Promise.all([selectedStoryId ? loadStory(selectedStoryId) : Promise.resolve(), loadCards(), loadStories()]);
+    const currentStoryId = selectedStoryIdRef.current;
+    await Promise.all([
+      currentStoryId ? refreshCurrentStory(currentStoryId) : Promise.resolve(),
+      loadCards()
+    ]);
   }
 
   useEffect(() => {
@@ -260,12 +274,13 @@ function App() {
       body: file
     });
     const payload = (await response.json().catch(() => null)) as { audioFile?: string; error?: string } | null;
-    if (!response.ok || !payload?.audioFile) {
+    const audioFile = payload?.audioFile;
+    if (!response.ok || !audioFile) {
       throw new Error(payload?.error || `Audio upload failed with ${response.status}.`);
     }
 
-    setStories((current) => current.map((item) => (item.id === storyId ? { ...item, hasAudio: true } : item)));
-    setStory((current) => (current?.id === storyId ? { ...current, audioFile: payload.audioFile } : current));
+    setStories((current) => current.map((item) => (item.id === storyId ? { ...item, audioFile } : item)));
+    setStory((current) => (current?.id === storyId ? { ...current, audioFile } : current));
   }
 
   async function deleteStoryAudio(storyId: string) {
@@ -273,7 +288,7 @@ function App() {
       method: "DELETE"
     });
 
-    setStories((current) => current.map((item) => (item.id === storyId ? { ...item, hasAudio: false } : item)));
+    setStories((current) => current.map((item) => (item.id === storyId ? { ...item, audioFile: null } : item)));
     setStory((current) => (current?.id === storyId ? { ...current, audioFile: null } : current));
   }
 
@@ -401,7 +416,7 @@ function App() {
 
       {view === "import" && <ImportView storyFolders={storyFolders} onImported={selectImportedStory} setError={setError} />}
 
-      {view === "cards" && <CardsView cards={cards} reloadCards={loadCards} setError={setError} />}
+      {view === "cards" && <CardsView cards={cards} stories={stories} reloadCards={loadCards} setError={setError} />}
 
       {view === "settings" && (
         <SettingsView settings={settings} reloadSettings={loadSettings} setError={setError} />

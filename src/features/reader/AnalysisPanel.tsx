@@ -4,6 +4,7 @@ import { apiJson } from "../../api/client";
 import { cardTypeLabel, syncLabel } from "../../domain/cards";
 import type { CardType, MinedCard, Sentence, Story, SuggestedCard } from "../../types";
 import { CardEditModal } from "../cards/CardEditModal";
+import { StoryAudioClipEditor, validateStoryAudioClip, type StoryAudioClip } from "./StoryAudioClipEditor";
 import { TargetSentence } from "./TargetSentence";
 
 type AnalysisPanelProps = {
@@ -14,6 +15,10 @@ type AnalysisPanelProps = {
   onAnalyzeSentence: (sentence: Sentence, force?: boolean) => Promise<void>;
   onClose: () => void;
   refreshStoryAndCards: () => Promise<void>;
+  storyAudioCurrentTime: number;
+  storyAudioDuration: number;
+  storyAudioPlayRequest: number;
+  onStartStoryAudioClipPreview: () => void;
   setError: (message: string) => void;
 };
 
@@ -33,6 +38,10 @@ export function AnalysisPanel({
   onAnalyzeSentence,
   onClose,
   refreshStoryAndCards,
+  storyAudioCurrentTime,
+  storyAudioDuration,
+  storyAudioPlayRequest,
+  onStartStoryAudioClipPreview,
   setError
 }: AnalysisPanelProps) {
   const croatianTextareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -46,6 +55,7 @@ export function AnalysisPanel({
   const [noteOpen, setNoteOpen] = useState(false);
   const [pendingSelection, setPendingSelection] = useState<ClozeSelection | null>(null);
   const [generateAudio, setGenerateAudio] = useState(false);
+  const [storyAudioClip, setStoryAudioClip] = useState<StoryAudioClip | null>(null);
   const [createAudioOnlyCard, setCreateAudioOnlyCard] = useState(false);
   const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState<MinePanelTab>("analysis");
@@ -54,6 +64,12 @@ export function AnalysisPanel({
   const targetText = targetSelection?.text || "";
   const editingCard = cards.find((card) => card.id === editingCardId) || null;
   const suggestedCards = sentence?.analysis?.suggestedCards ?? [];
+  const hasStoryAudio = Boolean(story?.audioFile);
+  const storyClipValidation = validateStoryAudioClip(storyAudioClip, storyAudioDuration);
+  const validStoryClip = Boolean(hasStoryAudio && storyClipValidation.state === "valid");
+  const invalidStoryClip = Boolean(
+    hasStoryAudio && storyAudioClip && storyClipValidation.state !== "valid"
+  );
 
   useEffect(() => {
     if (!sentence) return;
@@ -69,10 +85,16 @@ export function AnalysisPanel({
     setNoteOpen(false);
     setPendingSelection(null);
     setGenerateAudio(false);
+    setStoryAudioClip(null);
     setCreateAudioOnlyCard(false);
     setEditingCardId("");
     setCardEditorMessage("");
   }, [sentence?.id]);
+
+  useEffect(() => {
+    setStoryAudioClip(null);
+    setCreateAudioOnlyCard(false);
+  }, [story?.audioFile]);
 
   useEffect(() => {
     if (!sentence?.analysis?.english) return;
@@ -128,6 +150,7 @@ export function AnalysisPanel({
     setNote("");
     setNoteOpen(false);
     setGenerateAudio(false);
+    setStoryAudioClip(null);
     setCreateAudioOnlyCard(false);
     setCardEditorMessage("");
     setActiveTab("create");
@@ -143,6 +166,7 @@ export function AnalysisPanel({
     if (!story || !sentence) return;
     setSaving(true);
     setError("");
+    const audioMode = hasStoryAudio ? (validStoryClip ? "story-crop" : "none") : generateAudio ? "generate" : "none";
     try {
       await apiJson("/api/cards", {
         method: "POST",
@@ -156,8 +180,10 @@ export function AnalysisPanel({
           englishTranslation,
           hint,
           note,
-          generateAudio,
-          createAudioOnlyCard: generateAudio && createAudioOnlyCard
+          audioMode,
+          storyAudioStart: validStoryClip ? storyAudioClip?.start : undefined,
+          storyAudioEnd: validStoryClip ? storyAudioClip?.end : undefined,
+          createAudioOnlyCard: audioMode !== "none" && createAudioOnlyCard
         })
       });
       await refreshStoryAndCards();
@@ -167,6 +193,7 @@ export function AnalysisPanel({
       setNoteOpen(false);
       setPendingSelection(null);
       setGenerateAudio(false);
+      setStoryAudioClip(null);
       setCreateAudioOnlyCard(false);
       setCardEditorMessage("");
     } catch (caught) {
@@ -181,7 +208,12 @@ export function AnalysisPanel({
     ? croatianSentence.slice(targetSelection.start, targetSelection.end) === targetSelection.text
     : false;
   const canSave = Boolean(
-    sentence && croatianSentence && englishTranslation && !saving && (!needsHiddenText || (targetText && targetInSentence))
+    sentence &&
+      croatianSentence &&
+      englishTranslation &&
+      !saving &&
+      !invalidStoryClip &&
+      (!needsHiddenText || (targetText && targetInSentence))
   );
 
   return (
@@ -389,28 +421,58 @@ export function AnalysisPanel({
                 )}
               </div>
 
-              <label className="checkline setting-check">
-                <input
-                  type="checkbox"
-                  checked={generateAudio}
-                  onChange={(event) => {
-                    const checked = event.target.checked;
-                    setGenerateAudio(checked);
-                    if (!checked) setCreateAudioOnlyCard(false);
-                  }}
-                />
-                <Volume2 size={16} aria-hidden="true" />
-                Generate audio
-              </label>
-              <label className={`checkline setting-check audio-only-check ${generateAudio ? "" : "disabled"}`}>
-                <input
-                  type="checkbox"
-                  checked={generateAudio && createAudioOnlyCard}
-                  disabled={!generateAudio}
-                  onChange={(event) => setCreateAudioOnlyCard(event.target.checked)}
-                />
-                Create audio-only card as well
-              </label>
+              {hasStoryAudio ? (
+                <>
+                  <StoryAudioClipEditor
+                    storyId={story?.id as string}
+                    audioFile={story?.audioFile as string}
+                    value={storyAudioClip}
+                    onChange={(nextClip) => {
+                      setStoryAudioClip(nextClip);
+                      if (!nextClip) setCreateAudioOnlyCard(false);
+                    }}
+                    duration={storyAudioDuration}
+                    playhead={storyAudioCurrentTime}
+                    onPreviewStart={onStartStoryAudioClipPreview}
+                    previewStopRequest={storyAudioPlayRequest}
+                    setError={setError}
+                  />
+                  <label className={`checkline setting-check audio-only-check ${validStoryClip ? "" : "disabled"}`}>
+                    <input
+                      type="checkbox"
+                      checked={validStoryClip && createAudioOnlyCard}
+                      disabled={!validStoryClip}
+                      onChange={(event) => setCreateAudioOnlyCard(event.target.checked)}
+                    />
+                    Create audio-only card as well
+                  </label>
+                </>
+              ) : (
+                <>
+                  <label className="checkline setting-check">
+                    <input
+                      type="checkbox"
+                      checked={generateAudio}
+                      onChange={(event) => {
+                        const checked = event.target.checked;
+                        setGenerateAudio(checked);
+                        if (!checked) setCreateAudioOnlyCard(false);
+                      }}
+                    />
+                    <Volume2 size={16} aria-hidden="true" />
+                    Generate audio
+                  </label>
+                  <label className={`checkline setting-check audio-only-check ${generateAudio ? "" : "disabled"}`}>
+                    <input
+                      type="checkbox"
+                      checked={generateAudio && createAudioOnlyCard}
+                      disabled={!generateAudio}
+                      onChange={(event) => setCreateAudioOnlyCard(event.target.checked)}
+                    />
+                    Create audio-only card as well
+                  </label>
+                </>
+              )}
 
               <div className="mine-preview">
                 <TargetSentence
@@ -465,12 +527,15 @@ export function AnalysisPanel({
 
           {editingCard && (
             <CardEditModal
+              key={editingCard.id}
               card={editingCard}
               onClose={() => setEditingCardId("")}
               onCardsChanged={refreshStoryAndCards}
               setError={setError}
               onMessage={setCardEditorMessage}
               allowDelete={false}
+              storyAudioFile={story?.audioFile}
+              onStartStoryAudioPlayback={onStartStoryAudioClipPreview}
             />
           )}
         </>

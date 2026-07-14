@@ -96,7 +96,7 @@ export async function listStories() {
       title: story.title,
       level: story.level,
       folderId: story.folderId || "",
-      hasAudio: Boolean(story.audioFile),
+      audioFile: story.audioFile || null,
       completed: Boolean(state.completed)
     };
   });

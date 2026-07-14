@@ -23,7 +23,7 @@ import {
   renameStoryFolder
 } from "../repositories/storyFoldersRepository.js";
 import { generateAnalysis } from "../services/analysisService.js";
-import { deleteAudioFile, saveUploadedStoryAudio } from "../services/audioService.js";
+import { deleteAudioFile, renderStoryAudioClip, saveUploadedStoryAudio } from "../services/audioService.js";
 import { buildStory } from "../services/storyService.js";
 import { isSameOrDescendantFolder } from "../utils/folders.js";
 
@@ -140,6 +140,33 @@ textsRouter.delete("/folders/:id", async (request, response, next) => {
     response.status(204).end();
   } catch (error) {
     next(error);
+  }
+});
+
+textsRouter.get("/:id/audio/clip-preview", async (request, response, next) => {
+  const controller = new AbortController();
+  const abortOnDisconnect = () => {
+    if (!response.writableEnded) controller.abort();
+  };
+  response.on("close", abortOnDisconnect);
+
+  try {
+    const story = await readStory(request.params.id);
+    if (!story) return response.status(404).json({ error: "Story not found." });
+
+    const audio = await renderStoryAudioClip({
+      story,
+      start: request.query.start,
+      end: request.query.end,
+      signal: controller.signal
+    });
+    if (controller.signal.aborted) return;
+    response.set("Cache-Control", "no-store");
+    response.type("audio/wav").send(audio);
+  } catch (error) {
+    if (!controller.signal.aborted) next(error);
+  } finally {
+    response.off("close", abortOnDisconnect);
   }
 });
 

@@ -3,7 +3,13 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { apiJson } from "../../api/client";
 import { isSynced, syncLabel } from "../../domain/cards";
-import type { CardType, MinedCard } from "../../types";
+import type { AudioMode, CardType, MinedCard } from "../../types";
+import {
+  StoryAudioClipEditor,
+  validateStoryAudioClip,
+  type StoryAudioClip
+} from "../reader/StoryAudioClipEditor";
+import { StoryAudioPlayer, type StoryAudioStatus } from "../reader/StoryAudioPlayer";
 import { TargetSentence } from "../reader/TargetSentence";
 
 type CardEditModalProps = {
@@ -13,6 +19,8 @@ type CardEditModalProps = {
   setError: (message: string) => void;
   onMessage?: (message: string) => void;
   allowDelete?: boolean;
+  storyAudioFile?: string | null;
+  onStartStoryAudioPlayback?: () => void;
 };
 
 type CardEditDraft = {
@@ -24,7 +32,6 @@ type CardEditDraft = {
   englishTranslation: string;
   hint: string;
   note: string;
-  generateAudio: boolean;
   createAudioOnlyCard: boolean;
 };
 
@@ -34,8 +41,8 @@ type ClozeSelection = {
   text: string;
 };
 
-type AudioEditResolution = "regenerate" | "remove";
 type AudioWarningMode = "delete" | "regenerate";
+type ConfirmedAudioMode = Extract<AudioMode, "generate" | "none">;
 
 function hasValidTargetRange(sentence: string, target: string, targetStart?: number, targetEnd?: number) {
   if (!target || !Number.isInteger(targetStart) || !Number.isInteger(targetEnd)) return false;
@@ -54,30 +61,59 @@ function cardToEditDraft(card: MinedCard): CardEditDraft {
     englishTranslation: card.englishTranslation,
     hint: card.hint || "",
     note: card.note || "",
-    generateAudio: Boolean(card.audioFile),
     createAudioOnlyCard: Boolean(card.createAudioOnlyCard && card.audioFile)
   };
 }
 
-export function CardEditModal({ card, onClose, onCardsChanged, setError, onMessage, allowDelete = true }: CardEditModalProps) {
+function storyClipFromCard(card: MinedCard): StoryAudioClip | null {
+  if (
+    card.audioSource !== "story-crop" ||
+    !Number.isFinite(card.storyAudioStart) ||
+    !Number.isFinite(card.storyAudioEnd)
+  ) {
+    return null;
+  }
+
+  return {
+    start: card.storyAudioStart as number,
+    end: card.storyAudioEnd as number
+  };
+}
+
+function sameStoryClip(left: StoryAudioClip | null, right: StoryAudioClip | null) {
+  return left?.start === right?.start && left?.end === right?.end;
+}
+
+export function CardEditModal({
+  card,
+  onClose,
+  onCardsChanged,
+  setError,
+  onMessage,
+  allowDelete = true,
+  storyAudioFile = null,
+  onStartStoryAudioPlayback
+}: CardEditModalProps) {
   const editTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const savedAudioRef = useRef<HTMLAudioElement | null>(null);
   const [editDraft, setEditDraft] = useState<CardEditDraft>(() => cardToEditDraft(card));
   const [pendingEditSelection, setPendingEditSelection] = useState<ClozeSelection | null>(null);
+  const [storyAudioClip, setStoryAudioClip] = useState<StoryAudioClip | null>(() => storyClipFromCard(card));
+  const [generatedAudioEnabled, setGeneratedAudioEnabled] = useState(Boolean(card.audioFile));
+  const [storyAudioStatus, setStoryAudioStatus] = useState<StoryAudioStatus>(() => ({
+    currentTime: card.storyAudioStart ?? 0,
+    duration: 0
+  }));
+  const [storyAudioPauseRequest, setStoryAudioPauseRequest] = useState(0);
+  const [clipPreviewStopRequest, setClipPreviewStopRequest] = useState(0);
   const [audioWarningMode, setAudioWarningMode] = useState<AudioWarningMode | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
-  const [playingId, setPlayingId] = useState("");
-
-  useEffect(() => {
-    setEditDraft(cardToEditDraft(card));
-    setPendingEditSelection(null);
-    setAudioWarningMode(null);
-    setSavingEdit(false);
-  }, [card]);
+  const [playingSavedAudio, setPlayingSavedAudio] = useState(false);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => editTextareaRef.current?.focus());
     return () => window.cancelAnimationFrame(frame);
-  }, [card.id]);
+  }, []);
 
   useEffect(() => {
     const originalOverflow = document.body.style.overflow;
@@ -96,7 +132,14 @@ export function CardEditModal({ card, onClose, onCardsChanged, setError, onMessa
       document.body.style.overflow = originalOverflow;
       window.removeEventListener("keydown", closeOnEscape);
     };
-  }, [audioWarningMode, card.id, onClose, savingEdit]);
+  }, [audioWarningMode, onClose, savingEdit]);
+
+  useEffect(() => {
+    return () => {
+      savedAudioRef.current?.pause();
+      savedAudioRef.current = null;
+    };
+  }, []);
 
   function updateEditDraft(next: Partial<CardEditDraft>) {
     setEditDraft((current) => ({ ...current, ...next }));
@@ -135,21 +178,38 @@ export function CardEditModal({ card, onClose, onCardsChanged, setError, onMessa
     setPendingEditSelection(null);
   }
 
+  function getAudioMode(confirmedMode?: ConfirmedAudioMode): AudioMode {
+    if (confirmedMode) return confirmedMode;
+    if (hasStoryAudio) {
+      if (storyClipChanged) return storyClipValidation.state === "valid" ? "story-crop" : "none";
+      return card.audioFile ? "keep" : "none";
+    }
+    if (!generatedAudioEnabled) return "none";
+    return card.audioFile ? "keep" : "generate";
+  }
+
   function getAudioWarningMode() {
     if (!card.audioFile) return null;
-    if (!editDraft.generateAudio) return "delete";
-    if (editDraft.croatianSentence !== card.croatianSentence) return "regenerate";
+    const audioMode = getAudioMode();
+    if (audioMode === "none") return "delete";
+    if (
+      audioMode === "keep" &&
+      card.audioSource === "generated" &&
+      editDraft.croatianSentence !== card.croatianSentence
+    ) {
+      return hasStoryAudio ? "delete" : "regenerate";
+    }
     return null;
   }
 
-  async function saveEdit(audioResolution?: AudioEditResolution) {
+  async function saveEdit(confirmedAudioMode?: ConfirmedAudioMode) {
     const nextAudioWarningMode = getAudioWarningMode();
-    if (nextAudioWarningMode === "delete" && audioResolution !== "remove") {
+    if (nextAudioWarningMode === "delete" && !confirmedAudioMode) {
       setAudioWarningMode("delete");
       return;
     }
 
-    if (nextAudioWarningMode === "regenerate" && audioResolution !== "regenerate") {
+    if (nextAudioWarningMode === "regenerate" && !confirmedAudioMode) {
       setAudioWarningMode("regenerate");
       return;
     }
@@ -160,25 +220,30 @@ export function CardEditModal({ card, onClose, onCardsChanged, setError, onMessa
     setError("");
     onMessage?.("");
     try {
+      const audioMode = getAudioMode(confirmedAudioMode);
+      const willHaveAudio = audioMode !== "none";
       await apiJson(`/api/cards/${card.id}`, {
         method: "PATCH",
         body: JSON.stringify({
           ...editDraft,
-          ...(audioResolution ? { audioResolution } : {}),
-          createAudioOnlyCard: editDraft.generateAudio && audioResolution !== "remove" ? editDraft.createAudioOnlyCard : false
+          audioMode,
+          ...(audioMode === "story-crop" && storyAudioClip
+            ? { storyAudioStart: storyAudioClip.start, storyAudioEnd: storyAudioClip.end }
+            : {}),
+          createAudioOnlyCard: willHaveAudio ? editDraft.createAudioOnlyCard : false
         })
       });
       onClose();
       closed = true;
       await onCardsChanged();
-      const savedMessage =
-        audioResolution === "regenerate"
-          ? "Saved with regenerated audio."
-          : audioResolution === "remove"
-            ? "Saved without audio."
-            : !card.audioFile && editDraft.generateAudio
-              ? "Saved with generated audio."
-              : "Saved.";
+      let savedMessage = "Saved.";
+      if (audioMode === "story-crop") {
+        savedMessage = card.audioFile ? "Saved with updated story audio clip." : "Saved with story audio clip.";
+      } else if (audioMode === "none" && card.audioFile) {
+        savedMessage = "Saved without audio.";
+      } else if (audioMode === "generate") {
+        savedMessage = card.audioFile ? "Saved with regenerated audio." : "Saved with generated audio.";
+      }
       onMessage?.(isSynced(card) ? `${savedMessage} Sync to replace the Anki card.` : savedMessage);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Card update failed.");
@@ -214,26 +279,72 @@ export function CardEditModal({ card, onClose, onCardsChanged, setError, onMessa
     }
   }
 
+  function stopSavedAudio() {
+    savedAudioRef.current?.pause();
+    savedAudioRef.current = null;
+    setPlayingSavedAudio(false);
+  }
+
+  function handleStorySourcePlaybackStart() {
+    stopSavedAudio();
+    setClipPreviewStopRequest((current) => current + 1);
+    onStartStoryAudioPlayback?.();
+  }
+
+  function handleClipPreviewStart() {
+    stopSavedAudio();
+    setStoryAudioPauseRequest((current) => current + 1);
+    onStartStoryAudioPlayback?.();
+  }
+
   async function playAudio() {
     if (!card.audioFile) return;
-    setPlayingId(card.id);
+    stopSavedAudio();
+    setStoryAudioPauseRequest((current) => current + 1);
+    setClipPreviewStopRequest((current) => current + 1);
+    onStartStoryAudioPlayback?.();
+    setPlayingSavedAudio(true);
+    setError("");
+    const audio = new Audio(`/media/${encodeURIComponent(card.audioFile)}`);
+    savedAudioRef.current = audio;
+
+    function stopThisAudio() {
+      if (savedAudioRef.current !== audio) return;
+      savedAudioRef.current = null;
+      setPlayingSavedAudio(false);
+    }
+
     try {
-      const audio = new Audio(`/media/${encodeURIComponent(card.audioFile)}`);
-      audio.addEventListener("ended", () => setPlayingId(""));
+      audio.addEventListener("ended", stopThisAudio);
       audio.addEventListener("error", () => {
-        setPlayingId("");
-        setError("Could not play this card's audio file.");
+        const isCurrentAudio = savedAudioRef.current === audio;
+        stopThisAudio();
+        if (isCurrentAudio) setError("Could not play this card's audio file.");
       });
       await audio.play();
     } catch {
-      setPlayingId("");
-      setError("Could not play this card's audio file.");
+      const isCurrentAudio = savedAudioRef.current === audio;
+      stopThisAudio();
+      if (isCurrentAudio) setError("Could not play this card's audio file.");
     }
   }
 
   const editNeedsHiddenText = editDraft.type === "cloze";
+  const hasStoryAudio = Boolean(storyAudioFile);
   const showAudioDeleteWarning = audioWarningMode === "delete";
   const showAudioRegenerateWarning = audioWarningMode === "regenerate";
+  const storyClipValidation = validateStoryAudioClip(storyAudioClip, storyAudioStatus.duration);
+  const storyClipChanged = !sameStoryClip(storyAudioClip, storyClipFromCard(card));
+  const invalidEditedStoryClip = Boolean(
+    hasStoryAudio &&
+      storyClipChanged &&
+      storyAudioClip &&
+      storyClipValidation.state !== "valid"
+  );
+  const hasEffectiveStoryAudio = Boolean(
+    hasStoryAudio &&
+      (storyClipChanged ? storyClipValidation.state === "valid" : card.audioFile)
+  );
   const editTargetInSentence = hasValidTargetRange(
     editDraft.croatianSentence,
     editDraft.targetText,
@@ -244,6 +355,7 @@ export function CardEditModal({ card, onClose, onCardsChanged, setError, onMessa
     editDraft.croatianSentence &&
       editDraft.englishTranslation &&
       !savingEdit &&
+      !invalidEditedStoryClip &&
       (!editNeedsHiddenText || (editDraft.targetText && editTargetInSentence))
   );
 
@@ -267,10 +379,10 @@ export function CardEditModal({ card, onClose, onCardsChanged, setError, onMessa
                   onClick={() => {
                     void playAudio();
                   }}
-                  disabled={playingId === card.id}
+                  disabled={playingSavedAudio}
                 >
                   <Volume2 size={13} aria-hidden="true" />
-                  {playingId === card.id ? "Playing" : "Audio"}
+                  {playingSavedAudio ? "Playing" : hasStoryAudio ? "Saved audio" : "Audio"}
                 </button>
               )}
             </div>
@@ -410,30 +522,72 @@ export function CardEditModal({ card, onClose, onCardsChanged, setError, onMessa
             </label>
           </div>
 
-          <label className="checkline setting-check">
-            <input
-              type="checkbox"
-              checked={editDraft.generateAudio}
-              onChange={(event) => {
-                const checked = event.target.checked;
-                updateEditDraft({
-                  generateAudio: checked,
-                  createAudioOnlyCard: checked ? editDraft.createAudioOnlyCard : false
-                });
-              }}
-            />
-            <Volume2 size={16} aria-hidden="true" />
-            Generate audio
-          </label>
-          <label className={`checkline setting-check audio-only-check ${editDraft.generateAudio ? "" : "disabled"}`}>
-            <input
-              type="checkbox"
-              checked={editDraft.generateAudio && editDraft.createAudioOnlyCard}
-              disabled={!editDraft.generateAudio}
-              onChange={(event) => updateEditDraft({ createAudioOnlyCard: event.target.checked })}
-            />
-            Create audio-only card as well
-          </label>
+          {hasStoryAudio ? (
+            <div className="card-edit-story-audio">
+              <StoryAudioPlayer
+                audioFile={storyAudioFile as string}
+                title="Story source"
+                initialTime={card.storyAudioStart ?? 0}
+                onPlaybackStart={handleStorySourcePlaybackStart}
+                onStatusChange={setStoryAudioStatus}
+                pauseRequest={storyAudioPauseRequest}
+                setError={setError}
+              />
+              <StoryAudioClipEditor
+                storyId={card.storyId}
+                audioFile={storyAudioFile as string}
+                value={storyAudioClip}
+                onChange={(nextClip) => {
+                  setStoryAudioClip(nextClip);
+                  if (!nextClip) updateEditDraft({ createAudioOnlyCard: false });
+                }}
+                duration={storyAudioStatus.duration}
+                playhead={storyAudioStatus.currentTime}
+                onPreviewStart={handleClipPreviewStart}
+                previewStopRequest={clipPreviewStopRequest}
+                setError={setError}
+              />
+              {card.audioFile && !storyAudioClip && !storyClipChanged && (
+                <p className="card-edit-audio-note">
+                  The current saved audio will stay unless you choose a story clip.
+                </p>
+              )}
+              <label className={`checkline setting-check audio-only-check ${hasEffectiveStoryAudio ? "" : "disabled"}`}>
+                <input
+                  type="checkbox"
+                  checked={hasEffectiveStoryAudio && editDraft.createAudioOnlyCard}
+                  disabled={!hasEffectiveStoryAudio}
+                  onChange={(event) => updateEditDraft({ createAudioOnlyCard: event.target.checked })}
+                />
+                Create audio-only card as well
+              </label>
+            </div>
+          ) : (
+            <>
+              <label className="checkline setting-check">
+                <input
+                  type="checkbox"
+                  checked={generatedAudioEnabled}
+                  onChange={(event) => {
+                    const checked = event.target.checked;
+                    setGeneratedAudioEnabled(checked);
+                    if (!checked) updateEditDraft({ createAudioOnlyCard: false });
+                  }}
+                />
+                <Volume2 size={16} aria-hidden="true" />
+                Generate audio
+              </label>
+              <label className={`checkline setting-check audio-only-check ${generatedAudioEnabled ? "" : "disabled"}`}>
+                <input
+                  type="checkbox"
+                  checked={generatedAudioEnabled && editDraft.createAudioOnlyCard}
+                  disabled={!generatedAudioEnabled}
+                  onChange={(event) => updateEditDraft({ createAudioOnlyCard: event.target.checked })}
+                />
+                Create audio-only card as well
+              </label>
+            </>
+          )}
 
           <div className="mine-preview">
             <TargetSentence
@@ -478,11 +632,13 @@ export function CardEditModal({ card, onClose, onCardsChanged, setError, onMessa
               </span>
               <div>
                 <h3 id="audio-warning-title">
-                  {showAudioDeleteWarning ? "Delete saved audio?" : "Regenerate audio?"}
+                  {showAudioDeleteWarning ? "Remove saved audio?" : "Regenerate audio?"}
                 </h3>
                 <p id="audio-warning-description">
                   {showAudioDeleteWarning
-                    ? "Saving with Generate audio off will delete this card's saved audio file."
+                    ? hasStoryAudio
+                      ? "Saving will remove this card's saved audio. Choose a story clip to replace it, or continue without audio."
+                      : "Saving with Generate audio off will delete this card's saved audio file."
                     : "Audio was generated with the old Croatian text. Regenerate it for the edited sentence before saving."}
                 </p>
               </div>
@@ -513,7 +669,7 @@ export function CardEditModal({ card, onClose, onCardsChanged, setError, onMessa
                 <button
                   type="button"
                   onClick={() => {
-                    void saveEdit("regenerate");
+                    void saveEdit("generate");
                   }}
                   disabled={savingEdit}
                 >
@@ -526,7 +682,7 @@ export function CardEditModal({ card, onClose, onCardsChanged, setError, onMessa
                   type="button"
                   className="danger"
                   onClick={() => {
-                    void saveEdit("remove");
+                    void saveEdit("none");
                   }}
                   disabled={savingEdit}
                 >

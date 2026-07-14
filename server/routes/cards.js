@@ -13,7 +13,7 @@ import {
   shouldCreateAudioOnlyCard,
   uploadCardAudioForUpdate
 } from "../services/ankiService.js";
-import { addAudioIfRequested, deleteAudioFile, generateAudio } from "../services/audioService.js";
+import { cropStoryAudio, deleteCardAudioFile, generateAudio } from "../services/audioService.js";
 import {
   cleanCardType,
   createCard,
@@ -25,12 +25,42 @@ import { readSettings } from "../repositories/settingsRepository.js";
 
 export const cardsRouter = Router();
 
-function cleanAudioResolution(value) {
-  if (value === undefined || value === null || value === "") return "";
-  if (value === "regenerate" || value === "remove") return value;
-  const error = new Error("Audio resolution must be regenerate or remove.");
-  error.status = 400;
-  throw error;
+const createAudioModes = new Set(["none", "generate", "story-crop"]);
+const editAudioModes = new Set([...createAudioModes, "keep"]);
+
+function httpError(message, status) {
+  const error = new Error(message);
+  error.status = status;
+  return error;
+}
+
+function cleanAudioMode(value, allowedModes) {
+  if (allowedModes.has(value)) return value;
+  throw httpError(`Audio mode must be ${Array.from(allowedModes).join(", ")}.`, 400);
+}
+
+function clearCardAudio(card) {
+  card.audioFile = null;
+  card.audioSource = null;
+  card.storyAudioStart = null;
+  card.storyAudioEnd = null;
+  card.createAudioOnlyCard = false;
+}
+
+function setCardAudio(card, audio) {
+  card.audioFile = audio.audioFile;
+  card.audioSource = audio.audioSource;
+  card.storyAudioStart = audio.storyAudioStart ?? null;
+  card.storyAudioEnd = audio.storyAudioEnd ?? null;
+}
+
+function assertAudioModeAllowed({ story, current, audioMode }) {
+  if (audioMode === "generate" && story.audioFile) {
+    throw httpError("Generated audio is only available for stories without story audio.", 400);
+  }
+  if (audioMode === "keep" && !current?.audioFile) {
+    throw httpError("There is no saved audio to keep.", 400);
+  }
 }
 
 cardsRouter.get("/", async (_request, response, next) => {
@@ -52,12 +82,29 @@ cardsRouter.post("/", async (request, response, next) => {
     const cardsState = await readCards();
     const type = cleanCardType(request.body.type);
     const draft = createCard({ type, story, sentence, body: request.body });
+    const audioMode = cleanAudioMode(request.body.audioMode, createAudioModes);
+    assertAudioModeAllowed({ story, audioMode });
 
     if (isDuplicateCard(cardsState.cards, draft)) {
       return response.status(409).json({ error: "A matching card already exists." });
     }
 
-    await addAudioIfRequested(draft, Boolean(request.body.generateAudio));
+    if (audioMode === "generate") {
+      setCardAudio(draft, {
+        audioFile: await generateAudio({ text: draft.croatianSentence, cardId: draft.id }),
+        audioSource: "generated"
+      });
+    } else if (audioMode === "story-crop") {
+      setCardAudio(
+        draft,
+        await cropStoryAudio({
+          story,
+          cardId: draft.id,
+          start: request.body.storyAudioStart,
+          end: request.body.storyAudioEnd
+        })
+      );
+    }
     if (!draft.audioFile) draft.createAudioOnlyCard = false;
     cardsState.cards.push(draft);
     await writeCards(cardsState);
@@ -77,45 +124,53 @@ cardsRouter.patch("/:id", async (request, response, next) => {
 
     const current = cardsState.cards[index];
     const body = request.body || {};
-    const audioResolution = cleanAudioResolution(body.audioResolution);
-    const wantsAudio =
-      body.generateAudio === undefined
-        ? audioResolution !== "remove" && Boolean(current.audioFile)
-        : Boolean(body.generateAudio);
+    const story = await readStory(current.storyId);
+    if (!story) return response.status(404).json({ error: "Story not found." });
+    const audioMode = cleanAudioMode(body.audioMode, editAudioModes);
+    assertAudioModeAllowed({ story, current, audioMode });
     const updated = updateCardFields(current, body);
     if (isDuplicateCard(cardsState.cards, updated, current.id)) {
       return response.status(409).json({ error: "A matching card already exists." });
     }
 
-    const croatianTextChangedWithAudio = Boolean(current.audioFile && updated.croatianSentence !== current.croatianSentence);
-    const shouldDeleteAudio = Boolean(current.audioFile && !wantsAudio);
-    const shouldRegenerateAudio = Boolean(croatianTextChangedWithAudio && wantsAudio);
-    const shouldGenerateAudio = Boolean(!current.audioFile && wantsAudio);
+    const generatedAudioTextChanged = Boolean(
+      current.audioSource === "generated" && updated.croatianSentence !== current.croatianSentence
+    );
+    const shouldDeleteAudio = Boolean(current.audioFile && audioMode === "none");
+    const shouldReplaceAudio = audioMode === "generate" || audioMode === "story-crop";
 
-    if (shouldDeleteAudio && audioResolution !== "remove") {
-      return response.status(409).json({
-        error: "Saving with Generate audio off will delete the existing audio. Confirm this choice first."
-      });
-    }
-
-    if (shouldRegenerateAudio && audioResolution !== "regenerate") {
+    if (audioMode === "keep" && generatedAudioTextChanged) {
       return response.status(409).json({
         error: "Croatian text changed. Regenerate the existing audio or cancel this edit."
       });
     }
 
     if (shouldDeleteAudio) {
-      await deleteAudioFile(current.audioFile);
-      updated.audioFile = null;
-      updated.createAudioOnlyCard = false;
-    } else if (shouldRegenerateAudio || shouldGenerateAudio) {
-      updated.audioFile = await generateAudio({ text: updated.croatianSentence, cardId: updated.id });
-      updated.createAudioOnlyCard = Boolean(body.createAudioOnlyCard ?? current.createAudioOnlyCard);
-      if (shouldRegenerateAudio && current.audioFile !== updated.audioFile) await deleteAudioFile(current.audioFile);
-    } else if (!wantsAudio) {
-      updated.audioFile = null;
-      updated.createAudioOnlyCard = false;
+      await deleteCardAudioFile(current);
+      clearCardAudio(updated);
+    } else if (shouldReplaceAudio) {
+      if (audioMode === "generate") {
+        setCardAudio(updated, {
+          audioFile: await generateAudio({ text: updated.croatianSentence, cardId: updated.id }),
+          audioSource: "generated"
+        });
+      } else {
+        setCardAudio(
+          updated,
+          await cropStoryAudio({
+            story,
+            cardId: updated.id,
+            start: body.storyAudioStart,
+            end: body.storyAudioEnd
+          })
+        );
+      }
+      if (current.audioFile !== updated.audioFile) await deleteCardAudioFile(current);
     }
+
+    updated.createAudioOnlyCard = Boolean(
+      updated.audioFile && (body.createAudioOnlyCard ?? current.createAudioOnlyCard)
+    );
 
     if (current.ankiNoteId || current.audioOnlyAnkiNoteId) {
       queueCardAnkiNoteDeletions(cardsState, current);
@@ -141,6 +196,7 @@ cardsRouter.delete("/:id", async (request, response, next) => {
       return response.status(404).json({ error: "Card not found." });
     }
     queueCardAnkiNoteDeletions(cardsState, card);
+    await deleteCardAudioFile(card);
 
     const nextCards = cardsState.cards.filter((item) => item.id !== request.params.id);
     cardsState.cards = nextCards;

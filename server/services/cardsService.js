@@ -1,11 +1,11 @@
 import crypto from "node:crypto";
 import { asCleanString, normalizeText } from "../utils/text.js";
 
-export function makeCardId() {
+function makeCardId() {
   return `card_${Date.now().toString(36)}_${crypto.randomBytes(4).toString("hex")}`;
 }
 
-export function requireField(value, message) {
+function requireField(value, message) {
   const cleaned = asCleanString(value);
   if (!cleaned) {
     const error = new Error(message);
@@ -15,7 +15,7 @@ export function requireField(value, message) {
   return cleaned;
 }
 
-export function requireText(value, message) {
+function requireText(value, message) {
   const text = String(value ?? "");
   if (!text.trim()) {
     const error = new Error(message);
@@ -25,7 +25,7 @@ export function requireText(value, message) {
   return text;
 }
 
-export function targetSelectionFromBody(sentence, body) {
+function targetSelectionFromBody(sentence, body) {
   const targetStart = Number(body.targetStart);
   const targetEnd = Number(body.targetEnd);
   if (
@@ -68,6 +68,9 @@ export function createCard({ type, story, sentence, body }) {
     ),
     note: asCleanString(body.note),
     audioFile: null,
+    audioSource: null,
+    storyAudioStart: null,
+    storyAudioEnd: null,
     createAudioOnlyCard: Boolean(body.createAudioOnlyCard),
     ankiNoteId: null,
     audioOnlyAnkiNoteId: null,
@@ -85,7 +88,7 @@ export function cleanCardType(value, fallback) {
   throw error;
 }
 
-export function fieldOrCurrent(body, name, current) {
+function fieldOrCurrent(body, name, current) {
   return body[name] === undefined ? current : body[name];
 }
 
@@ -101,8 +104,7 @@ export function updateCardFields(card, body) {
     fieldOrCurrent(body, "englishTranslation", card.englishTranslation),
     "English translation is required."
   );
-  const sentenceChanged = croatianSentence !== card.croatianSentence;
-  const audioFile = sentenceChanged ? null : card.audioFile || null;
+  const audioFile = card.audioFile || null;
 
   const updated = {
     ...card,
@@ -111,6 +113,9 @@ export function updateCardFields(card, body) {
     englishTranslation,
     note: asCleanString(fieldOrCurrent(body, "note", card.note)),
     audioFile,
+    audioSource: audioFile ? card.audioSource : null,
+    storyAudioStart: audioFile ? card.storyAudioStart : null,
+    storyAudioEnd: audioFile ? card.storyAudioEnd : null,
     createAudioOnlyCard: Boolean(fieldOrCurrent(body, "createAudioOnlyCard", card.createAudioOnlyCard)) && Boolean(audioFile)
   };
   if (type !== "cloze") {
@@ -145,7 +150,7 @@ export function isDuplicateCard(cards, draft, ignoredCardId = "") {
   );
 }
 
-export function queueAnkiNoteDeletion(cardsState, noteId) {
+function queueAnkiNoteDeletion(cardsState, noteId) {
   const id = Number(noteId);
   if (!Number.isFinite(id)) return;
   const existingQueue = Array.isArray(cardsState.deletedAnkiNoteIds) ? cardsState.deletedAnkiNoteIds : [];

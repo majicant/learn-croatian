@@ -32,7 +32,7 @@ import type { FolderTreeNode } from "../../domain/stories";
 import type { MinedCard, Paragraph, Sentence, Story, StoryFolder, StorySummary } from "../../types";
 import { AnalysisPanel } from "./AnalysisPanel";
 import { SentenceEditModal } from "./SentenceEditModal";
-import { StoryAudioPlayer } from "./StoryAudioPlayer";
+import { StoryAudioPlayer, type StoryAudioStatus } from "./StoryAudioPlayer";
 
 type StorySidebarMode = "level" | "folder";
 type StoryStatusFilter = "all" | "open" | "completed";
@@ -156,6 +156,9 @@ export function ReaderView({
   const [pendingStoryAudioFile, setPendingStoryAudioFile] = useState<File | null>(null);
   const [pendingStoryAudioRemoved, setPendingStoryAudioRemoved] = useState(false);
   const [storyAudioInputKey, setStoryAudioInputKey] = useState(0);
+  const [storyAudioStatus, setStoryAudioStatus] = useState<StoryAudioStatus>({ currentTime: 0, duration: 0 });
+  const [storyAudioPauseRequest, setStoryAudioPauseRequest] = useState(0);
+  const [storyAudioPlayRequest, setStoryAudioPlayRequest] = useState(0);
   const [savingContentEdits, setSavingContentEdits] = useState(false);
   const [updatingProgressStoryId, setUpdatingProgressStoryId] = useState("");
 
@@ -197,6 +200,10 @@ export function ReaderView({
     document.addEventListener("click", closeMenus);
     return () => document.removeEventListener("click", closeMenus);
   }, [openMenuId]);
+
+  useEffect(() => {
+    setStoryAudioStatus({ currentTime: 0, duration: 0 });
+  }, [story?.audioFile]);
 
   async function addFolder(parentId = "") {
     if (creatingFolder) return;
@@ -766,7 +773,7 @@ export function ReaderView({
           >
             <span className="story-title-line">
               <span className="story-title">{item.title}</span>
-              {item.hasAudio && (
+              {item.audioFile && (
                 <span className="story-audio-indicator" aria-label="Has audio" title="Has audio">
                   <AudioLines size={14} aria-hidden="true" />
                 </span>
@@ -1134,7 +1141,14 @@ export function ReaderView({
               </div>
             ) : story.audioFile && (
               <div className="reader-audio-footer">
-                <StoryAudioPlayer audioFile={story.audioFile} title={story.title} setError={setError} />
+                <StoryAudioPlayer
+                  audioFile={story.audioFile}
+                  title={story.title}
+                  onPlaybackStart={() => setStoryAudioPlayRequest((current) => current + 1)}
+                  onStatusChange={setStoryAudioStatus}
+                  pauseRequest={storyAudioPauseRequest}
+                  setError={setError}
+                />
               </div>
             )}
           </>
@@ -1158,6 +1172,10 @@ export function ReaderView({
         onAnalyzeSentence={onAnalyzeSentence}
         onClose={onCloseSentence}
         refreshStoryAndCards={refreshStoryAndCards}
+        storyAudioCurrentTime={storyAudioStatus.currentTime}
+        storyAudioDuration={storyAudioStatus.duration}
+        storyAudioPlayRequest={storyAudioPlayRequest}
+        onStartStoryAudioClipPreview={() => setStoryAudioPauseRequest((current) => current + 1)}
         setError={setError}
       />
     </main>

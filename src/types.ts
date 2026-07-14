@@ -1,5 +1,7 @@
 export type View = "read" | "import" | "cards" | "settings";
 export type CardType = "basic" | "cloze";
+type AudioSource = "generated" | "story-crop";
+export type AudioMode = "none" | "generate" | "story-crop" | "keep";
 type SyncStatus = "pending" | "synced" | "error";
 
 export type SuggestedCard = {
@@ -41,7 +43,7 @@ export type StorySummary = {
   title: string;
   level: string;
   folderId: string;
-  hasAudio?: boolean;
+  audioFile: string | null;
   completed: boolean;
 };
 
@@ -63,8 +65,11 @@ export type MinedCard = {
   englishTranslation: string;
   hint?: string;
   note?: string;
-  audioFile?: string | null;
-  createAudioOnlyCard?: boolean;
+  audioFile: string | null;
+  audioSource: AudioSource | null;
+  storyAudioStart: number | null;
+  storyAudioEnd: number | null;
+  createAudioOnlyCard: boolean;
   syncStatus: SyncStatus;
   syncError?: string | null;
 };
