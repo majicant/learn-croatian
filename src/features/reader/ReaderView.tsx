@@ -34,7 +34,7 @@ import { AnalysisPanel } from "./AnalysisPanel";
 import { SentenceEditModal } from "./SentenceEditModal";
 import { StoryAudioPlayer, type StoryAudioStatus } from "./StoryAudioPlayer";
 
-type StorySidebarMode = "level" | "folder";
+export type StorySidebarMode = "level" | "folder";
 type StoryStatusFilter = "all" | "open" | "completed";
 
 function cleanSentenceText(value: string) {
@@ -53,6 +53,8 @@ const STORY_STATUS_FILTERS: Array<{ value: StoryStatusFilter; label: string }> =
 type ReaderProps = {
   stories: StorySummary[];
   storyFolders: StoryFolder[];
+  sidebarMode: StorySidebarMode;
+  onSidebarModeChange: (mode: StorySidebarMode) => void;
   selectedStoryId: string;
   onSelectStory: (id: string) => void;
   onCreateFolder: (parentId?: string) => Promise<StoryFolder>;
@@ -86,6 +88,8 @@ type ReaderProps = {
 export function ReaderView({
   stories,
   storyFolders,
+  sidebarMode,
+  onSidebarModeChange,
   selectedStoryId,
   onSelectStory,
   onCreateFolder,
@@ -134,7 +138,6 @@ export function ReaderView({
     () => (isStoryListFiltered ? groupedStories.filter(([, levelStories]) => levelStories.length > 0) : groupedStories),
     [groupedStories, isStoryListFiltered]
   );
-  const [sidebarMode, setSidebarMode] = useState<StorySidebarMode>("level");
   const [creatingFolder, setCreatingFolder] = useState(false);
   const [movingStoryId, setMovingStoryId] = useState("");
   const [movingFolderId, setMovingFolderId] = useState("");
@@ -978,11 +981,19 @@ export function ReaderView({
           </div>
         </div>
         <div className="sidebar-mode-toggle" role="group" aria-label="Story organization">
-          <button type="button" className={sidebarMode === "level" ? "active" : ""} onClick={() => setSidebarMode("level")}>
+          <button
+            type="button"
+            className={sidebarMode === "level" ? "active" : ""}
+            onClick={() => onSidebarModeChange("level")}
+          >
             <List size={15} aria-hidden="true" />
             Levels
           </button>
-          <button type="button" className={sidebarMode === "folder" ? "active" : ""} onClick={() => setSidebarMode("folder")}>
+          <button
+            type="button"
+            className={sidebarMode === "folder" ? "active" : ""}
+            onClick={() => onSidebarModeChange("folder")}
+          >
             <Folder size={15} aria-hidden="true" />
             Folders
           </button>

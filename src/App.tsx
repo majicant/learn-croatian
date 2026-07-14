@@ -10,7 +10,7 @@ import { DEFAULT_SETTINGS } from "./constants";
 import { buildPages, isSameOrDescendantFolder, sentenceList } from "./domain/stories";
 import { CardsView } from "./features/cards/CardsView";
 import { ImportView } from "./features/import/ImportView";
-import { ReaderView } from "./features/reader/ReaderView";
+import { ReaderView, type StorySidebarMode } from "./features/reader/ReaderView";
 import { SettingsView } from "./features/settings/SettingsView";
 import type { Analysis, MinedCard, SettingsState, Sentence, Story, StoryFolder, StorySummary, View } from "./types";
 
@@ -25,6 +25,7 @@ function clampPageIndex(pageIndex: number, pageCount: number) {
 
 function App() {
   const [view, setView] = useState<View>("read");
+  const [readerSidebarMode, setReaderSidebarMode] = useState<StorySidebarMode>("folder");
   const [stories, setStories] = useState<StorySummary[]>([]);
   const [storyFolders, setStoryFolders] = useState<StoryFolder[]>([]);
   const [story, setStory] = useState<Story | null>(null);
@@ -383,6 +384,8 @@ function App() {
         <ReaderView
           stories={stories}
           storyFolders={storyFolders}
+          sidebarMode={readerSidebarMode}
+          onSidebarModeChange={setReaderSidebarMode}
           selectedStoryId={selectedStoryId}
           onSelectStory={setSelectedStoryId}
           onCreateFolder={createStoryFolder}
