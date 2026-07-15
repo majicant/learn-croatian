@@ -419,7 +419,15 @@ function App() {
 
       {view === "import" && <ImportView storyFolders={storyFolders} onImported={selectImportedStory} setError={setError} />}
 
-      {view === "cards" && <CardsView cards={cards} stories={stories} reloadCards={loadCards} setError={setError} />}
+      {view === "cards" && (
+        <CardsView
+          cards={cards}
+          stories={stories}
+          storyFolders={storyFolders}
+          reloadCards={loadCards}
+          setError={setError}
+        />
+      )}
 
       {view === "settings" && (
         <SettingsView settings={settings} reloadSettings={loadSettings} setError={setError} />
