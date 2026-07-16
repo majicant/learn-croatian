@@ -12,7 +12,17 @@ import { CardsView } from "./features/cards/CardsView";
 import { ImportView } from "./features/import/ImportView";
 import { ReaderView, type StorySidebarMode } from "./features/reader/ReaderView";
 import { SettingsView } from "./features/settings/SettingsView";
-import type { Analysis, MinedCard, SettingsState, Sentence, Story, StoryFolder, StorySummary, View } from "./types";
+import type {
+  Analysis,
+  CardLoadState,
+  MinedCard,
+  SettingsState,
+  Sentence,
+  Story,
+  StoryFolder,
+  StorySummary,
+  View
+} from "./types";
 
 function cleanPageIndex(value: unknown) {
   const pageIndex = Number(value);
@@ -32,6 +42,7 @@ function App() {
   const [selectedStoryId, setSelectedStoryId] = useState<string>("");
   const [selectedSentenceId, setSelectedSentenceId] = useState<string>("");
   const [cards, setCards] = useState<MinedCard[]>([]);
+  const [cardLoadState, setCardLoadState] = useState<CardLoadState>("loading");
   const [settings, setSettings] = useState<SettingsState>(DEFAULT_SETTINGS);
   const [pageIndex, setPageIndexState] = useState(0);
   const [loadingStory, setLoadingStory] = useState(false);
@@ -65,8 +76,14 @@ function App() {
   }
 
   async function loadCards() {
-    const payload = await apiJson<{ cards: MinedCard[] }>("/api/cards");
-    setCards(payload.cards);
+    try {
+      const payload = await apiJson<{ cards: MinedCard[] }>("/api/cards");
+      setCards(payload.cards);
+      setCardLoadState("ready");
+    } catch (caught) {
+      setCardLoadState("error");
+      throw caught;
+    }
   }
 
   async function loadStoryFolders() {
@@ -407,6 +424,8 @@ function App() {
           setPageIndex={setReaderPageIndex}
           selectedSentence={selectedSentence}
           selectedSentenceCards={selectedSentenceCards}
+          allCards={cards}
+          cardLoadState={cardLoadState}
           analyzingId={analyzingId}
           onChooseSentence={chooseSentence}
           onAnalyzeSentence={analyzeSentence}

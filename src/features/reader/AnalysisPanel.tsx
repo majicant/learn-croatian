@@ -1,8 +1,15 @@
 import { RefreshCw, Save, Volume2, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import type { KeyboardEvent } from "react";
 import { apiJson } from "../../api/client";
 import { cardTypeLabel, syncLabel } from "../../domain/cards";
-import type { CardType, MinedCard, Sentence, Story, SuggestedCard } from "../../types";
+import {
+  buildWordCoverageIndex,
+  lookupWordCoverage,
+  tokenizeWords,
+  type WordToken
+} from "../../domain/wordCoverage";
+import type { CardLoadState, CardType, MinedCard, Sentence, Story, SuggestedCard } from "../../types";
 import { CardEditModal } from "../cards/CardEditModal";
 import { StoryAudioClipEditor, validateStoryAudioClip, type StoryAudioClip } from "./StoryAudioClipEditor";
 import { TargetSentence } from "./TargetSentence";
@@ -11,6 +18,8 @@ type AnalysisPanelProps = {
   story: Story | null;
   sentence: Sentence | null;
   cards: MinedCard[];
+  allCards: MinedCard[];
+  cardLoadState: CardLoadState;
   isAnalyzing: boolean;
   onAnalyzeSentence: (sentence: Sentence, force?: boolean) => Promise<void>;
   onClose: () => void;
@@ -30,10 +39,49 @@ type ClozeSelection = {
 
 type MinePanelTab = "analysis" | "create" | "saved";
 
+const MATCH_PREVIEW_LIMIT = 6;
+
+function coverageMessage(matchCount: number, loadState: CardLoadState) {
+  if (loadState === "loading") return "Checking saved cards…";
+  if (loadState === "error") return "Saved-card coverage is unavailable.";
+  if (matchCount === 0) return "This exact form is not in any saved cards.";
+  if (matchCount === 1) return "This exact form appears in 1 saved card.";
+  return `This exact form appears in ${matchCount} saved cards.`;
+}
+
+function clozeMatchMessage(matchCount: number) {
+  if (matchCount === 0) return "";
+  if (matchCount === 1) return " It is hidden in 1 cloze card.";
+  return ` It is hidden in ${matchCount} cloze cards.`;
+}
+
+function MatchedCroatianText({ text, normalizedWord }: { text: string; normalizedWord: string }) {
+  const tokens = tokenizeWords(text);
+  let cursor = 0;
+
+  return (
+    <>
+      {tokens.map((token) => {
+        const before = text.slice(cursor, token.start);
+        cursor = token.end;
+        return (
+          <Fragment key={`${token.start}-${token.end}`}>
+            {before}
+            {token.normalized === normalizedWord ? <mark>{token.text}</mark> : token.text}
+          </Fragment>
+        );
+      })}
+      {text.slice(cursor)}
+    </>
+  );
+}
+
 export function AnalysisPanel({
   story,
   sentence,
   cards,
+  allCards,
+  cardLoadState,
   isAnalyzing,
   onAnalyzeSentence,
   onClose,
@@ -45,6 +93,7 @@ export function AnalysisPanel({
   setError
 }: AnalysisPanelProps) {
   const croatianTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const wordButtonRefs = useRef<Map<number, HTMLButtonElement>>(new Map());
   const previousAnalysisEnglishRef = useRef("");
   const [cardType, setCardType] = useState<CardType>("basic");
   const [croatianSentence, setCroatianSentence] = useState("");
@@ -61,6 +110,8 @@ export function AnalysisPanel({
   const [activeTab, setActiveTab] = useState<MinePanelTab>("analysis");
   const [editingCardId, setEditingCardId] = useState("");
   const [cardEditorMessage, setCardEditorMessage] = useState("");
+  const [selectedWord, setSelectedWord] = useState<WordToken | null>(null);
+  const [activeWordStart, setActiveWordStart] = useState<number | null>(null);
   const targetText = targetSelection?.text || "";
   const editingCard = cards.find((card) => card.id === editingCardId) || null;
   const suggestedCards = sentence?.analysis?.suggestedCards ?? [];
@@ -70,8 +121,20 @@ export function AnalysisPanel({
   const invalidStoryClip = Boolean(
     hasStoryAudio && storyAudioClip && storyClipValidation.state !== "valid"
   );
+  const wordCoverageIndex = useMemo(() => buildWordCoverageIndex(allCards), [allCards]);
+  const sentenceWords = useMemo(() => tokenizeWords(sentence?.croatian || ""), [sentence?.croatian]);
+  const selectedWordMatches = selectedWord
+    ? lookupWordCoverage(wordCoverageIndex, selectedWord.normalized)
+    : [];
+  const selectedWordClozeMatches = selectedWordMatches.filter((match) => match.isClozeTarget).length;
+  const targetWords = useMemo(() => tokenizeWords(targetText), [targetText]);
+  const targetWord = targetWords.length === 1 ? targetWords[0] : null;
+  const targetWordMatches = targetWord ? lookupWordCoverage(wordCoverageIndex, targetWord.normalized) : [];
+  const targetWordClozeMatches = targetWordMatches.filter((match) => match.isClozeTarget).length;
 
   useEffect(() => {
+    setSelectedWord(null);
+    setActiveWordStart(null);
     if (!sentence) return;
     const nextEnglish = sentence.analysis?.english || "";
     previousAnalysisEnglishRef.current = nextEnglish;
@@ -89,7 +152,7 @@ export function AnalysisPanel({
     setCreateAudioOnlyCard(false);
     setEditingCardId("");
     setCardEditorMessage("");
-  }, [sentence?.id]);
+  }, [sentence?.croatian, sentence?.id]);
 
   useEffect(() => {
     setStoryAudioClip(null);
@@ -154,6 +217,86 @@ export function AnalysisPanel({
     setCreateAudioOnlyCard(false);
     setCardEditorMessage("");
     setActiveTab("create");
+  }
+
+  function chooseWord(word: WordToken) {
+    setActiveWordStart(word.start);
+    setSelectedWord((current) => (current?.start === word.start ? null : word));
+  }
+
+  function moveWordFocus(event: KeyboardEvent<HTMLButtonElement>, wordIndex: number) {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      const focusedWord = sentenceWords[wordIndex];
+      if (focusedWord) chooseWord(focusedWord);
+      return;
+    }
+
+    let nextIndex = wordIndex;
+    if (event.key === "ArrowLeft") nextIndex = Math.max(0, wordIndex - 1);
+    else if (event.key === "ArrowRight") nextIndex = Math.min(sentenceWords.length - 1, wordIndex + 1);
+    else if (event.key === "Home") nextIndex = 0;
+    else if (event.key === "End") nextIndex = sentenceWords.length - 1;
+    else return;
+
+    event.preventDefault();
+    const nextWord = sentenceWords[nextIndex];
+    if (!nextWord) return;
+    setActiveWordStart(nextWord.start);
+    wordButtonRefs.current.get(nextWord.start)?.focus();
+  }
+
+  function useWordAsCloze(word: WordToken) {
+    if (!sentence) return;
+    const sourceWord = sentence.croatian.slice(word.start, word.end);
+    if (sourceWord !== word.text) return;
+
+    let nextTarget = word;
+    let resetDraft = false;
+    if (croatianSentence !== sentence.croatian) {
+      const draftMatches = tokenizeWords(croatianSentence).filter(
+        (draftWord) => draftWord.normalized === word.normalized
+      );
+      if (draftMatches.length === 1) {
+        nextTarget = draftMatches[0];
+      } else {
+        const replaceDraft = window.confirm(
+          `Use “${word.text}” as a cloze target?\n\nThis exact word is missing or repeated in your current Croatian draft. Continuing will replace the draft with the full selected sentence and clear its other fields.`
+        );
+        if (!replaceDraft) return;
+        resetDraft = true;
+      }
+    }
+
+    const nextCroatianSentence = resetDraft ? sentence.croatian : croatianSentence;
+    const nextTargetText = nextCroatianSentence.slice(nextTarget.start, nextTarget.end);
+    if (!nextTargetText) return;
+    const targetChanged =
+      !targetSelection ||
+      targetSelection.start !== nextTarget.start ||
+      targetSelection.end !== nextTarget.end ||
+      targetSelection.text !== nextTargetText;
+
+    if (resetDraft) {
+      const nextEnglish = sentence.analysis?.english || "";
+      previousAnalysisEnglishRef.current = nextEnglish;
+      setCroatianSentence(sentence.croatian);
+      setEnglishTranslation(nextEnglish);
+      setHint("");
+      setNote("");
+      setNoteOpen(false);
+      setGenerateAudio(false);
+      setStoryAudioClip(null);
+      setCreateAudioOnlyCard(false);
+    }
+
+    setCardType("cloze");
+    setTargetSelection({ start: nextTarget.start, end: nextTarget.end, text: nextTargetText });
+    if (targetChanged) setHint("");
+    setPendingSelection(null);
+    setCardEditorMessage("");
+    setActiveTab("create");
+    window.requestAnimationFrame(() => croatianTextareaRef.current?.focus());
   }
 
   async function rerunAnalysis() {
@@ -272,9 +415,114 @@ export function AnalysisPanel({
               role="tabpanel"
               aria-labelledby="mine-tab-analysis-button"
             >
-              <p className="selected-croatian">
-                {sentence.croatian}
-              </p>
+              <section className="word-inspector" aria-label="Word inspector">
+                <p className="word-inspector-help" id="word-inspector-help">
+                  Choose a word to check saved cards.
+                </p>
+                <p
+                  className="selected-croatian inspectable-sentence"
+                  role="toolbar"
+                  aria-label="Words in the selected Croatian sentence"
+                  aria-describedby="word-inspector-help"
+                  aria-orientation="horizontal"
+                >
+                  {sentenceWords.map((word, wordIndex) => {
+                    const previousEnd = wordIndex === 0 ? 0 : sentenceWords[wordIndex - 1].end;
+                    const isSelected = selectedWord?.start === word.start;
+                    return (
+                      <Fragment key={`${word.start}-${word.end}`}>
+                        {sentence.croatian.slice(previousEnd, word.start)}
+                        <button
+                          ref={(element) => {
+                            if (element) wordButtonRefs.current.set(word.start, element);
+                            else wordButtonRefs.current.delete(word.start);
+                          }}
+                          className={`inspectable-word ${isSelected ? "selected" : ""}`}
+                          type="button"
+                          lang="hr"
+                          aria-pressed={isSelected}
+                          tabIndex={(activeWordStart ?? sentenceWords[0]?.start) === word.start ? 0 : -1}
+                          onClick={() => chooseWord(word)}
+                          onKeyDown={(event) => moveWordFocus(event, wordIndex)}
+                        >
+                          {word.text}
+                        </button>
+                      </Fragment>
+                    );
+                  })}
+                  {sentence.croatian.slice(sentenceWords[sentenceWords.length - 1]?.end || 0)}
+                </p>
+                <div className="word-inspector-announcement" role="status" aria-live="polite" aria-atomic="true">
+                  {selectedWord
+                    ? `${selectedWord.text}. ${coverageMessage(selectedWordMatches.length, cardLoadState)}${
+                        cardLoadState === "ready" ? clozeMatchMessage(selectedWordClozeMatches) : ""
+                      }`
+                    : ""}
+                </div>
+
+                {selectedWord && (
+                  <div
+                    className={`word-inspector-result ${
+                      cardLoadState === "ready" && selectedWordMatches.length ? "covered" : "not-covered"
+                    }`}
+                  >
+                    <div className="word-inspector-status" id="word-inspector-status">
+                      <strong lang="hr">{selectedWord.text}</strong>
+                      <span>
+                        {coverageMessage(selectedWordMatches.length, cardLoadState)}
+                        {cardLoadState === "ready" && clozeMatchMessage(selectedWordClozeMatches)}
+                      </span>
+                    </div>
+                    <button
+                      className="secondary word-inspector-cloze"
+                      type="button"
+                      aria-describedby="word-inspector-status"
+                      onClick={() => useWordAsCloze(selectedWord)}
+                    >
+                      Use as cloze
+                    </button>
+
+                    {cardLoadState === "ready" && selectedWordMatches.length > 0 && (
+                      <details
+                        className="word-match-disclosure"
+                        key={`${sentence.id}-${selectedWord.start}-${selectedWord.normalized}`}
+                      >
+                        <summary>
+                          View {selectedWordMatches.length} matching {selectedWordMatches.length === 1 ? "card" : "cards"}
+                        </summary>
+                        <ul className="word-match-list" role="list">
+                          {selectedWordMatches.slice(0, MATCH_PREVIEW_LIMIT).map((match) => (
+                            <li className="word-match-card" key={match.card.id}>
+                              <div className="word-match-meta">
+                                <span>
+                                  {match.isClozeTarget
+                                    ? "Cloze target"
+                                    : match.card.type === "cloze"
+                                      ? "Cloze card"
+                                      : "Basic card"}
+                                </span>
+                                <span>{syncLabel(match.card)}</span>
+                              </div>
+                              <p lang="hr">
+                                <MatchedCroatianText
+                                  text={match.card.croatianSentence}
+                                  normalizedWord={selectedWord.normalized}
+                                />
+                              </p>
+                              <p>{match.card.englishTranslation}</p>
+                            </li>
+                          ))}
+                        </ul>
+                        {selectedWordMatches.length > MATCH_PREVIEW_LIMIT && (
+                          <p className="word-match-limit">
+                            Showing the first {MATCH_PREVIEW_LIMIT} of {selectedWordMatches.length} matching cards.
+                          </p>
+                        )}
+                      </details>
+                    )}
+                  </div>
+                )}
+              </section>
 
               <section className="analysis-block">
                 <div className="analysis-block-head">
@@ -340,7 +588,7 @@ export function AnalysisPanel({
               aria-labelledby="mine-tab-create-button"
             >
               <h3>Create card</h3>
-              <div className="segmented">
+                <div className="segmented">
                 {(["basic", "cloze"] as CardType[]).map((type) => (
                   <button className={cardType === type ? "active" : ""} key={type} onClick={() => setCardType(type)}>
                     {cardTypeLabel(type)}
@@ -393,6 +641,12 @@ export function AnalysisPanel({
                         {targetText ? "Replace" : "Hide selection"}
                       </button>
                     </div>
+                    {targetWord && (
+                      <p className="target-coverage-note">
+                        {coverageMessage(targetWordMatches.length, cardLoadState)}
+                        {cardLoadState === "ready" && clozeMatchMessage(targetWordClozeMatches)}
+                      </p>
+                    )}
                     {targetText && !targetInSentence && <p className="field-error">Hidden text must match the Croatian text exactly.</p>}
 
                     <label>

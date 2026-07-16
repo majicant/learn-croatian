@@ -29,7 +29,7 @@ import {
   sentenceList
 } from "../../domain/stories";
 import type { FolderTreeNode } from "../../domain/stories";
-import type { MinedCard, Paragraph, Sentence, Story, StoryFolder, StorySummary } from "../../types";
+import type { CardLoadState, MinedCard, Paragraph, Sentence, Story, StoryFolder, StorySummary } from "../../types";
 import { AnalysisPanel } from "./AnalysisPanel";
 import { SentenceEditModal } from "./SentenceEditModal";
 import { StoryAudioPlayer, type StoryAudioStatus } from "./StoryAudioPlayer";
@@ -76,6 +76,8 @@ type ReaderProps = {
   setPageIndex: (index: number) => void;
   selectedSentence: Sentence | null;
   selectedSentenceCards: MinedCard[];
+  allCards: MinedCard[];
+  cardLoadState: CardLoadState;
   analyzingId: string;
   onChooseSentence: (sentence: Sentence) => void;
   onAnalyzeSentence: (sentence: Sentence, force?: boolean) => Promise<void>;
@@ -111,6 +113,8 @@ export function ReaderView({
   setPageIndex,
   selectedSentence,
   selectedSentenceCards,
+  allCards,
+  cardLoadState,
   analyzingId,
   onChooseSentence,
   onAnalyzeSentence,
@@ -1179,6 +1183,8 @@ export function ReaderView({
         story={story}
         sentence={selectedSentence}
         cards={selectedSentenceCards}
+        allCards={allCards}
+        cardLoadState={cardLoadState}
         isAnalyzing={analyzingId === selectedSentence?.id}
         onAnalyzeSentence={onAnalyzeSentence}
         onClose={onCloseSentence}

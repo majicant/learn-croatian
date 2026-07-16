@@ -1,5 +1,6 @@
 export type View = "read" | "import" | "cards" | "settings";
 export type CardType = "basic" | "cloze";
+export type CardLoadState = "loading" | "ready" | "error";
 type AudioSource = "generated" | "story-crop";
 export type AudioMode = "none" | "generate" | "story-crop" | "keep";
 type SyncStatus = "pending" | "synced" | "error";
