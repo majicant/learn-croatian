@@ -828,13 +828,14 @@ h4 {
 .reader-action-buttons {
   align-items: center;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 0.5rem;
   justify-content: flex-end;
 }
 
 .edit-mode-save-button,
-.edit-mode-cancel-button {
+.edit-mode-cancel-button,
+.edit-mode-view-text-button {
   align-items: center;
   display: inline-flex;
   font-size: 0.88rem;
@@ -878,14 +879,27 @@ h4 {
   border-color: #c7d0be;
 }
 
+.edit-mode-view-text-button.secondary {
+  background: var(--accent-soft);
+  border-color: #bfd4c4;
+  color: var(--accent);
+}
+
+.edit-mode-view-text-button.secondary:hover {
+  background: #d1e4db;
+  border-color: #a9c9b7;
+}
+
 .edit-mode-save-button:focus-visible,
-.edit-mode-cancel-button:focus-visible {
+.edit-mode-cancel-button:focus-visible,
+.edit-mode-view-text-button:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
 .edit-mode-save-button svg,
-.edit-mode-cancel-button svg {
+.edit-mode-cancel-button svg,
+.edit-mode-view-text-button svg {
   flex: 0 0 auto;
 }
 
@@ -2230,6 +2244,7 @@ button.card-filter-clear {
   border: 1px solid var(--border);
   box-shadow: 0 24px 60px rgba(39, 43, 36, 0.24);
   max-height: min(760px, calc(100vh - 2.5rem));
+  max-height: min(760px, calc(100dvh - 2.5rem));
   max-width: min(720px, 100%);
   overflow: auto;
   padding: 1rem;
@@ -2377,6 +2392,32 @@ button.card-filter-clear {
   line-height: 1.55;
 }
 
+.story-text-edit-modal {
+  max-width: min(860px, 100%);
+  width: min(860px, 100%);
+}
+
+.story-text-edit-modal textarea {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.03rem;
+  font-weight: 400;
+  height: min(46vh, 28rem);
+  line-height: 1.65;
+  min-height: 16rem;
+}
+
+.story-text-edit-hint {
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.45;
+  margin: -0.25rem 0 0;
+}
+
+.story-text-edit-actions {
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
 .sentence-edit-actions .danger {
   margin-left: 0;
 }
@@ -2488,6 +2529,12 @@ button.card-filter-clear {
   }
 }
 
+@media (max-width: 420px) {
+  .reader-action-buttons {
+    flex-wrap: wrap;
+  }
+}
+
 @media (max-width: 620px) {
   .topbar {
     align-items: stretch;
@@ -2552,6 +2599,7 @@ button.card-filter-clear {
 
   .card-modal {
     max-height: calc(100vh - 1.5rem);
+    max-height: calc(100dvh - 1.5rem);
   }
 
   .confirm-dialog-backdrop {
@@ -2586,10 +2634,16 @@ button.card-filter-clear {
   }
 
   .sentence-edit-actions,
-  .sentence-confirm-actions {
+  .sentence-confirm-actions,
+  .story-text-edit-actions {
     display: grid;
     margin-left: 0;
     width: 100%;
+  }
+
+  .story-text-edit-modal textarea {
+    height: min(42dvh, 20rem);
+    min-height: min(14rem, 38dvh);
   }
 
   .reader-scroll-area,

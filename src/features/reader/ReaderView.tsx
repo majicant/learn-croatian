@@ -6,6 +6,7 @@ import {
   ChevronRight,
   Circle,
   FileAudio,
+  FileText,
   Folder,
   FolderPlus,
   List,
@@ -19,7 +20,7 @@ import {
   Trash2,
   X
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ChangeEvent, DragEvent, KeyboardEvent, MouseEvent } from "react";
 import {
   buildFolderTree,
@@ -33,12 +34,20 @@ import type { CardLoadState, MinedCard, Paragraph, Sentence, Story, StoryFolder,
 import { AnalysisPanel } from "./AnalysisPanel";
 import { SentenceEditModal } from "./SentenceEditModal";
 import { StoryAudioPlayer, type StoryAudioStatus } from "./StoryAudioPlayer";
+import { StoryTextEditModal } from "./StoryTextEditModal";
 
 export type StorySidebarMode = "level" | "folder";
 type StoryStatusFilter = "all" | "open" | "completed";
 
 function cleanSentenceText(value: string) {
   return value.trim().replace(/\s+/g, " ");
+}
+
+function storyTextFromParagraphs(paragraphs: Paragraph[]) {
+  return paragraphs
+    .map((paragraph) => paragraph.sentences.map((sentence) => sentence.croatian.trim()).filter(Boolean).join(" "))
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 const STORY_DRAG_TYPE = "application/x-learn-croatian-story";
@@ -62,6 +71,8 @@ type ReaderProps = {
   onRenameStory: (storyId: string, title: string) => Promise<void>;
   onChangeStoryLevel: (storyId: string, level: string) => Promise<void>;
   onUpdateSentence: (storyId: string, sentenceId: string, croatian: string) => Promise<void>;
+  onUpdateStoryText: (storyId: string, text: string) => Promise<void>;
+  onUnsavedChangesChange: (hasChanges: boolean) => void;
   onDeleteSentence: (storyId: string, sentenceId: string) => Promise<void>;
   onUploadStoryAudio: (storyId: string, file: File) => Promise<void>;
   onDeleteStoryAudio: (storyId: string) => Promise<void>;
@@ -99,6 +110,8 @@ export function ReaderView({
   onRenameStory,
   onChangeStoryLevel,
   onUpdateSentence,
+  onUpdateStoryText,
+  onUnsavedChangesChange,
   onDeleteSentence,
   onUploadStoryAudio,
   onDeleteStoryAudio,
@@ -158,8 +171,11 @@ export function ReaderView({
   const [openMenuId, setOpenMenuId] = useState("");
   const [contentEditStoryId, setContentEditStoryId] = useState("");
   const [editingSentence, setEditingSentence] = useState<Sentence | null>(null);
+  const [editingStoryText, setEditingStoryText] = useState(false);
+  const [storyTextModalDirty, setStoryTextModalDirty] = useState(false);
   const [pendingSentenceEdits, setPendingSentenceEdits] = useState<Record<string, string>>({});
   const [pendingDeletedSentenceIds, setPendingDeletedSentenceIds] = useState<Set<string>>(() => new Set());
+  const [pendingStoryText, setPendingStoryText] = useState<string | null>(null);
   const [pendingStoryAudioFile, setPendingStoryAudioFile] = useState<File | null>(null);
   const [pendingStoryAudioRemoved, setPendingStoryAudioRemoved] = useState(false);
   const [storyAudioInputKey, setStoryAudioInputKey] = useState(0);
@@ -168,12 +184,41 @@ export function ReaderView({
   const [storyAudioPlayRequest, setStoryAudioPlayRequest] = useState(0);
   const [savingContentEdits, setSavingContentEdits] = useState(false);
   const [updatingProgressStoryId, setUpdatingProgressStoryId] = useState("");
+  const contentEditStoryIdRef = useRef(contentEditStoryId);
+  const hasPendingContentEdits = Boolean(
+    pendingStoryText !== null ||
+      storyTextModalDirty ||
+      Object.keys(pendingSentenceEdits).length ||
+      pendingDeletedSentenceIds.size ||
+      pendingStoryAudioFile ||
+      pendingStoryAudioRemoved
+  );
+
+  useEffect(() => {
+    contentEditStoryIdRef.current = contentEditStoryId;
+  }, [contentEditStoryId]);
+
+  useEffect(() => {
+    onUnsavedChangesChange(hasPendingContentEdits);
+    return () => onUnsavedChangesChange(false);
+  }, [hasPendingContentEdits, onUnsavedChangesChange]);
+
+  useEffect(() => {
+    if (!hasPendingContentEdits) return;
+    function warnBeforeUnload(event: BeforeUnloadEvent) {
+      event.preventDefault();
+      event.returnValue = "";
+    }
+    window.addEventListener("beforeunload", warnBeforeUnload);
+    return () => window.removeEventListener("beforeunload", warnBeforeUnload);
+  }, [hasPendingContentEdits]);
 
   const isEditingStoryContent = Boolean(story && contentEditStoryId === story.id);
-  const stagedPages = useMemo(() => {
-    if (!isEditingStoryContent || !story) return pages;
+  const stagedParagraphs = useMemo(() => {
+    if (!story) return [];
+    if (!isEditingStoryContent) return story.paragraphs;
 
-    const paragraphs = story.paragraphs
+    return story.paragraphs
       .map((paragraph) => ({
         ...paragraph,
         sentences: paragraph.sentences
@@ -189,9 +234,11 @@ export function ReaderView({
           })
       }))
       .filter((paragraph) => paragraph.sentences.length);
-
-    return buildPages(paragraphs);
-  }, [isEditingStoryContent, pages, pendingDeletedSentenceIds, pendingSentenceEdits, story]);
+  }, [isEditingStoryContent, pendingDeletedSentenceIds, pendingSentenceEdits, story]);
+  const stagedPages = useMemo(
+    () => (isEditingStoryContent ? buildPages(stagedParagraphs) : pages),
+    [isEditingStoryContent, pages, stagedParagraphs]
+  );
   const selectedStorySummary = useMemo(
     () => stories.find((item) => item.id === selectedStoryId) || null,
     [stories, selectedStoryId]
@@ -486,28 +533,45 @@ export function ReaderView({
     setOpenMenuId((current) => (current === id ? "" : id));
   }
 
-  function clearContentEditing() {
+  function clearContentEditing(expectedStoryId = "") {
+    if (expectedStoryId && contentEditStoryIdRef.current !== expectedStoryId) return;
+    contentEditStoryIdRef.current = "";
     setContentEditStoryId("");
     setEditingSentence(null);
+    setEditingStoryText(false);
+    setStoryTextModalDirty(false);
     setPendingSentenceEdits({});
     setPendingDeletedSentenceIds(new Set());
+    setPendingStoryText(null);
     setPendingStoryAudioFile(null);
     setPendingStoryAudioRemoved(false);
     setStoryAudioInputKey((current) => current + 1);
   }
 
   function selectStoryFromSidebar(storyId: string) {
-    if (storyId !== selectedStoryId) clearContentEditing();
+    if (savingContentEdits) return;
+    if (storyId !== selectedStoryId) {
+      if (hasPendingContentEdits && !window.confirm("Discard your unsaved story edits?")) return;
+      clearContentEditing();
+    }
     onSelectStory(storyId);
   }
 
   function startEditingStoryContent(item: StorySummary) {
+    if (savingContentEdits) return;
     setOpenMenuId("");
     if (contentEditStoryId === item.id) return;
+    if (contentEditStoryId && hasPendingContentEdits && !window.confirm("Discard your unsaved story edits?")) {
+      return;
+    }
+    contentEditStoryIdRef.current = item.id;
     setContentEditStoryId(item.id);
     setEditingSentence(null);
+    setEditingStoryText(false);
+    setStoryTextModalDirty(false);
     setPendingSentenceEdits({});
     setPendingDeletedSentenceIds(new Set());
+    setPendingStoryText(null);
     setPendingStoryAudioFile(null);
     setPendingStoryAudioRemoved(false);
     setStoryAudioInputKey((current) => current + 1);
@@ -518,7 +582,16 @@ export function ReaderView({
   }
 
   function openSentenceEditor(sentence: Sentence) {
+    if (savingContentEdits) return;
     setEditingSentence(sentence);
+    onCloseSentence();
+  }
+
+  function openStoryTextEditor() {
+    if (savingContentEdits) return;
+    setEditingStoryText(true);
+    setStoryTextModalDirty(false);
+    setEditingSentence(null);
     onCloseSentence();
   }
 
@@ -553,6 +626,18 @@ export function ReaderView({
       return next;
     });
     setEditingSentence(null);
+  }
+
+  function stageEditedStoryText(text: string) {
+    if (!story) return;
+    const nextText = text.replace(/\r\n/g, "\n").trim();
+    if (!nextText) return;
+    const persistedText = storyTextFromParagraphs(story.paragraphs);
+    setPendingStoryText(nextText === persistedText ? null : nextText);
+    setPendingSentenceEdits({});
+    setPendingDeletedSentenceIds(new Set());
+    setStoryTextModalDirty(false);
+    setEditingStoryText(false);
   }
 
   function deleteEditedSentence(sentence: Sentence) {
@@ -636,28 +721,39 @@ export function ReaderView({
     const editedSentences = Object.entries(pendingSentenceEdits).filter(
       ([sentenceId]) => !pendingDeletedSentenceIds.has(sentenceId)
     );
+    const storyTextChanged = pendingStoryText !== null;
     const audioChanged = Boolean(pendingStoryAudioFile || (pendingStoryAudioRemoved && story.audioFile));
 
-    if (!deletedSentenceIds.length && !editedSentences.length && !audioChanged) {
+    if (!storyTextChanged && !deletedSentenceIds.length && !editedSentences.length && !audioChanged) {
       clearContentEditing();
+      return;
+    }
+
+    if (storyTextChanged && !pendingStoryText.trim()) {
+      setError("Story text is required.");
       return;
     }
 
     setSavingContentEdits(true);
     setError("");
     try {
-      for (const [sentenceId, croatian] of editedSentences) {
-        await onUpdateSentence(storyId, sentenceId, croatian);
-      }
-      for (const sentenceId of deletedSentenceIds) {
-        await onDeleteSentence(storyId, sentenceId);
+      if (storyTextChanged) {
+        await onUpdateStoryText(storyId, pendingStoryText);
+        if (contentEditStoryIdRef.current === storyId) setPendingStoryText(null);
+      } else {
+        for (const [sentenceId, croatian] of editedSentences) {
+          await onUpdateSentence(storyId, sentenceId, croatian);
+        }
+        for (const sentenceId of deletedSentenceIds) {
+          await onDeleteSentence(storyId, sentenceId);
+        }
       }
       if (pendingStoryAudioFile) {
         await onUploadStoryAudio(storyId, pendingStoryAudioFile);
       } else if (pendingStoryAudioRemoved && story.audioFile) {
         await onDeleteStoryAudio(storyId);
       }
-      clearContentEditing();
+      clearContentEditing(storyId);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Story edits could not be saved.");
     } finally {
@@ -715,6 +811,7 @@ export function ReaderView({
           onClick={(event) => toggleMenu(event, menuId)}
           aria-label={`Story options for ${item.title}`}
           title="Story options"
+          disabled={savingContentEdits}
         >
           <MoreHorizontal size={15} aria-hidden="true" />
         </button>
@@ -748,7 +845,7 @@ export function ReaderView({
   function renderStoryRow(item: StorySummary) {
     const isDragging = draggingStoryId === item.id;
     const isEditing = editingStoryId === item.id;
-    const isDraggable = !isEditing;
+    const isDraggable = !isEditing && !savingContentEdits;
 
     return (
       <div
@@ -777,6 +874,7 @@ export function ReaderView({
             type="button"
             onClick={() => selectStoryFromSidebar(item.id)}
             onDoubleClick={() => startRenamingStory(item)}
+            disabled={savingContentEdits}
           >
             <span className="story-title-line">
               <span className="story-title">{item.title}</span>
@@ -1076,9 +1174,18 @@ export function ReaderView({
                   <div className="reader-actions" aria-label="Edit mode actions">
                     <div className="reader-action-buttons">
                       <button
+                        className="edit-mode-view-text-button secondary"
+                        type="button"
+                        onClick={openStoryTextEditor}
+                        disabled={savingContentEdits}
+                      >
+                        <FileText size={16} aria-hidden="true" />
+                        View text
+                      </button>
+                      <button
                         className="edit-mode-cancel-button secondary"
                         type="button"
-                        onClick={clearContentEditing}
+                        onClick={() => clearContentEditing()}
                         disabled={savingContentEdits}
                       >
                         <X size={16} aria-hidden="true" />
@@ -1094,7 +1201,7 @@ export function ReaderView({
                         {savingContentEdits ? "Saving..." : "Save"}
                       </button>
                     </div>
-                    <span className="edit-mode-label">Edit mode</span>
+                    <span className="edit-mode-label">{pendingStoryText !== null ? "Text staged" : "Edit mode"}</span>
                   </div>
                 )}
               </div>
@@ -1133,10 +1240,18 @@ export function ReaderView({
                           selectedSentence?.id === sentence.id ? "selected" : ""
                         }`}
                         key={sentence.id}
-                        onClick={() => (isEditingStoryContent ? openSentenceEditor(sentence) : onChooseSentence(sentence))}
+                        onClick={() =>
+                          isEditingStoryContent
+                            ? pendingStoryText !== null
+                              ? openStoryTextEditor()
+                              : openSentenceEditor(sentence)
+                            : onChooseSentence(sentence)
+                        }
                         title={
                           isEditingStoryContent
-                            ? "Edit sentence"
+                            ? pendingStoryText !== null
+                              ? "Edit staged story text"
+                              : "Edit sentence"
                             : sentence.hasCards
                               ? `${sentence.cardCount} saved card(s)`
                               : "Analyze sentence"
@@ -1176,6 +1291,19 @@ export function ReaderView({
           onClose={() => setEditingSentence(null)}
           onSave={stageEditedSentence}
           onDelete={deleteEditedSentence}
+        />
+      )}
+
+      {story && editingStoryText && (
+        <StoryTextEditModal
+          storyTitle={story.title}
+          text={pendingStoryText ?? storyTextFromParagraphs(stagedParagraphs)}
+          onClose={() => {
+            setStoryTextModalDirty(false);
+            setEditingStoryText(false);
+          }}
+          onDirtyChange={setStoryTextModalDirty}
+          onSave={stageEditedStoryText}
         />
       )}
 

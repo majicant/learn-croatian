@@ -24,7 +24,7 @@ import {
 } from "../repositories/storyFoldersRepository.js";
 import { generateAnalysis } from "../services/analysisService.js";
 import { deleteAudioFile, renderStoryAudioClip, saveUploadedStoryAudio } from "../services/audioService.js";
-import { buildStory } from "../services/storyService.js";
+import { buildStory, replaceStoryText } from "../services/storyService.js";
 import { isSameOrDescendantFolder } from "../utils/folders.js";
 
 export const textsRouter = Router();
@@ -196,6 +196,34 @@ textsRouter.patch("/:id", async (request, response, next) => {
     });
     if (!story) return response.status(404).json({ error: "Story not found." });
     response.json({ storyId: story.id, title: story.title, level: story.level });
+  } catch (error) {
+    next(error);
+  }
+});
+
+textsRouter.put("/:id/text", async (request, response, next) => {
+  try {
+    const story = await readStory(request.params.id);
+    if (!story) return response.status(404).json({ error: "Story not found." });
+
+    if (typeof request.body?.text !== "string") {
+      return response.status(400).json({ error: "Story text must be a string." });
+    }
+
+    const text = request.body.text.trim();
+    if (!text) return response.status(400).json({ error: "Story text is required." });
+
+    const cardsState = await readCards();
+    const reservedSentenceIds = cardsState.cards
+      .filter((card) => card.storyId === story.id)
+      .map((card) => card.sentenceId);
+    const updatedStory = replaceStoryText(story, text, reservedSentenceIds);
+    if (!updatedStory.paragraphs.length) {
+      return response.status(400).json({ error: "The text did not contain any sentences." });
+    }
+
+    await writeStory(updatedStory);
+    response.json({ story: attachCardStatus(updatedStory, cardsState.cards) });
   } catch (error) {
     next(error);
   }

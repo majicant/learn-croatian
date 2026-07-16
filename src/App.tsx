@@ -48,6 +48,7 @@ function App() {
   const [loadingStory, setLoadingStory] = useState(false);
   const [analyzingId, setAnalyzingId] = useState("");
   const [error, setError] = useState("");
+  const [hasUnsavedReaderEdits, setHasUnsavedReaderEdits] = useState(false);
   const selectedStoryIdRef = useRef(selectedStoryId);
 
   selectedStoryIdRef.current = selectedStoryId;
@@ -281,6 +282,17 @@ function App() {
     });
   }
 
+  async function updateStoryText(storyId: string, text: string) {
+    const payload = await apiJson<{ story: Story }>(`/api/texts/${encodeURIComponent(storyId)}/text`, {
+      method: "PUT",
+      body: JSON.stringify({ text })
+    });
+    setStory((current) =>
+      current?.id === storyId ? { ...payload.story, pageIndex: current.pageIndex } : current
+    );
+    clearSelectedSentence();
+  }
+
   async function uploadStoryAudio(storyId: string, file: File) {
     const contentType = file.type.startsWith("audio/") ? file.type : "application/octet-stream";
     const response = await fetch(`/api/texts/${encodeURIComponent(storyId)}/audio`, {
@@ -363,6 +375,12 @@ function App() {
     setView("read");
   }
 
+  function changeView(nextView: View) {
+    if (nextView === view) return;
+    if (hasUnsavedReaderEdits && !window.confirm("Discard your unsaved story edits?")) return;
+    setView(nextView);
+  }
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -371,19 +389,19 @@ function App() {
           <span>Learn Croatian</span>
         </div>
         <nav className="tabs" aria-label="Main views">
-          <button className={view === "read" ? "active" : ""} onClick={() => setView("read")}>
+          <button className={view === "read" ? "active" : ""} onClick={() => changeView("read")}>
             <BookOpen size={16} aria-hidden="true" />
             Read
           </button>
-          <button className={view === "import" ? "active" : ""} onClick={() => setView("import")}>
+          <button className={view === "import" ? "active" : ""} onClick={() => changeView("import")}>
             <FilePlus2 size={16} aria-hidden="true" />
             Import
           </button>
-          <button className={view === "cards" ? "active" : ""} onClick={() => setView("cards")}>
+          <button className={view === "cards" ? "active" : ""} onClick={() => changeView("cards")}>
             <Library size={16} aria-hidden="true" />
             Cards
           </button>
-          <button className={view === "settings" ? "active" : ""} onClick={() => setView("settings")}>
+          <button className={view === "settings" ? "active" : ""} onClick={() => changeView("settings")}>
             <SettingsIcon size={16} aria-hidden="true" />
             Settings
           </button>
@@ -410,6 +428,8 @@ function App() {
           onRenameStory={renameStory}
           onChangeStoryLevel={changeStoryLevel}
           onUpdateSentence={updateStorySentence}
+          onUpdateStoryText={updateStoryText}
+          onUnsavedChangesChange={setHasUnsavedReaderEdits}
           onDeleteSentence={deleteStorySentence}
           onUploadStoryAudio={uploadStoryAudio}
           onDeleteStoryAudio={deleteStoryAudio}
